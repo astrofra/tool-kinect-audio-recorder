@@ -8,7 +8,7 @@
 
 namespace recorder {
 RecordOptions::RecordOptions() : source("simulate"), signal("markers"), depth_pattern("off"), sample_rate(48000),
-    channels(1), frequency(440.0), amplitude(0.25), duration_seconds(0), segment_seconds(60), fast(false) {}
+    channels(1), frequency(440.0), amplitude(0.25), duration_seconds(0), segment_seconds(60), fast(false), encode_depth(false) {}
 
 void validate_options(const RecordOptions& o) {
     if (o.output.empty()) throw std::invalid_argument("Choose an output directory");
@@ -18,6 +18,7 @@ void validate_options(const RecordOptions& o) {
     if (o.signal != "sine" && o.signal != "markers") throw std::invalid_argument("Signal must be sine or markers");
     if (o.depth_pattern != "off" && o.depth_pattern != "gradient" && o.depth_pattern != "noise")
         throw std::invalid_argument("Depth must be off, gradient or noise");
+    if (o.encode_depth && o.depth_pattern == "off") throw std::invalid_argument("Automatic encoding requires depth capture");
     if (!std::isfinite(o.frequency) || o.frequency <= 0 || o.frequency * (o.channels == 2 ? 1.5 : 1.0) >= o.sample_rate * 0.5)
         throw std::invalid_argument("Tone frequency must be positive and below Nyquist on every channel");
     if (!std::isfinite(o.amplitude) || o.amplitude < 0 || o.amplitude > 1)

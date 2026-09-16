@@ -25,6 +25,7 @@ public:
     void finish();
     std::uint64_t frames() const { return frames_; }
     std::uint64_t timing_bytes() const;
+    std::size_t finalized_segments() const { return finalized_segments_; }
     std::shared_ptr<const DepthFrame> latest() const { return latest_; }
     std::string json() const;
 private:
@@ -36,6 +37,7 @@ private:
     std::string directory_, pattern_;
     unsigned rate_, segment_seconds_;
     std::uint64_t frames_;
+    std::size_t finalized_segments_;
     std::FILE* file_;
     std::FILE* timing_;
     std::vector<File> files_;
@@ -45,5 +47,6 @@ private:
 
 // Export one finalized KD16 segment, optionally with its corresponding WAV segment.
 void export_depth_video(const std::string& input, const std::string& output,
-    const std::string& audio, const std::string& ffmpeg);
+    const std::string& audio, const std::string& ffmpeg, bool background = false,
+    const std::string& log = std::string());
 }

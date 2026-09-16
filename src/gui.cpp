@@ -141,16 +141,18 @@ int run(int argc, char** argv) {
     std::vector<std::string> takes;
     std::string ui_error;
     bool was_active = false, smoke_started = false, close_after_stop = false;
+    bool encode_depth = true;
     const std::chrono::steady_clock::time_point began = std::chrono::steady_clock::now();
     int exit_code = 0;
     while (true) {
         glfwPollEvents();
         recorder::RecorderStatus status = recorder.status();
+        const recorder::EncodingStatus encoding = recorder.encoding_status();
         if (glfwWindowShouldClose(window)) {
-            if (status.active) { recorder.request_stop(); close_after_stop = true; glfwSetWindowShouldClose(window, GLFW_FALSE); }
-            else break;
+            recorder.request_stop(); close_after_stop = true;
+            glfwSetWindowShouldClose(window, GLFW_FALSE);
         }
-        if (close_after_stop && !status.active) break;
+        if (close_after_stop && !status.active && !encoding.busy()) break;
         if (was_active && !status.active) { recorder.wait(); takes.push_back(status.output); }
         was_active = status.active;
         ImGui_ImplOpenGL3_NewFrame(); ImGui_ImplGlfw_NewFrame(); ImGui::NewFrame();
@@ -170,7 +172,7 @@ int run(int argc, char** argv) {
             ImGui::TableNextRow(); ImGui::TableSetColumnIndex(0);
         }
         ImGui::Separator();
-        ImGui::BeginDisabled(status.active);
+        ImGui::BeginDisabled(status.active || close_after_stop);
         ImGui::SetNextItemWidth(240);
         ImGui::Combo("Source", &source_choice, "Simulated audio\0Windows microphone (WASAPI)\0");
         if (source_choice == 0) {
@@ -197,12 +199,15 @@ int run(int argc, char** argv) {
         }
         ImGui::SetNextItemWidth(240);
         ImGui::Combo("Depth source", &depth_choice, "Off (audio only)\0Simulated gradient\0Simulated noise\0");
+        ImGui::BeginDisabled(depth_choice == 0);
+        ImGui::Checkbox("Encode finished segments to Matroska in background", &encode_depth);
+        ImGui::EndDisabled();
         ImGui::SetNextItemWidth(-120); ImGui::InputText("Take folder", output, sizeof(output));
         if (ImGui::Button("New take path")) set_text(output, sizeof(output), recorder::default_take_path());
         ImGui::SameLine(); ImGui::SetNextItemWidth(130); ImGui::InputDouble("Seconds (0 = until Stop)", &duration, 0, 0, "%.2f");
         ImGui::EndDisabled();
         ImGui::Separator();
-        ImGui::BeginDisabled(status.active);
+        ImGui::BeginDisabled(status.active || close_after_stop);
         const bool record_pressed = ImGui::Button("Record", ImVec2(140, 42));
         ImGui::EndDisabled(); ImGui::SameLine();
         ImGui::BeginDisabled(!status.active);
@@ -214,6 +219,7 @@ int run(int argc, char** argv) {
             options.device_id = device_choice > 0 ? devices[device_choice - 1].id : "";
             options.signal = signal_choice == 0 ? "markers" : "sine";
             options.depth_pattern = depth_choice == 0 ? "off" : depth_choice == 1 ? "gradient" : "noise";
+            options.encode_depth = encode_depth && depth_choice != 0;
             options.sample_rate = static_cast<unsigned>(sample_rate); options.channels = static_cast<unsigned>(channels);
             options.frequency = frequency; options.amplitude = amplitude; options.duration_seconds = smoke ? 0.25 : duration;
             if (source_choice != 0) {
@@ -242,6 +248,18 @@ int run(int argc, char** argv) {
         }
         if (columns) {
             ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted("BACKGROUND ENCODING");
+            ImGui::Text("%s / %llu queued / %llu done / %llu failed", encoding.active ? "Encoding" : "Idle",
+                static_cast<unsigned long long>(encoding.pending), static_cast<unsigned long long>(encoding.completed),
+                static_cast<unsigned long long>(encoding.failed));
+            if (encoding.active) ImGui::TextWrapped("%s", encoding.current_output.c_str());
+            ImGui::TextWrapped("One video at a time. Originals are kept. New takes can start while encoding continues.");
+            if (!encoding.last_error.empty()) ImGui::TextWrapped("Encoding error: %s", encoding.last_error.c_str());
+            if (close_after_stop) {
+                ImGui::TextWrapped("Finishing capture and encodings before closing...");
+                if (ImGui::Button("Keep window open")) close_after_stop = false;
+            }
+            ImGui::Separator();
             draw_depth_preview(status, depth_texture, displayed_depth);
             ImGui::EndTable();
         }
@@ -249,9 +267,9 @@ int run(int argc, char** argv) {
         int w, h; glfwGetFramebufferSize(window, &w, &h);
         glViewport(0, 0, w, h); glClearColor(0.065f, 0.08f, 0.105f, 1); glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-        if (smoke && smoke_started && !status.active && status.state != "Idle") {
+        if (smoke && smoke_started && !status.active && !encoding.busy() && status.state != "Idle") {
             screenshot(window, smoke_output + ".ppm");
-            exit_code = status.error.empty() && ui_error.empty() ? 0 : 1;
+            exit_code = status.error.empty() && ui_error.empty() && !encoding.failed ? 0 : 1;
             break;
         }
         glfwSwapBuffers(window);

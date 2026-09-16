@@ -21,7 +21,10 @@ std::FILE* open_file(const std::string& path, const char* mode);
 void sync_file(std::FILE* file);
 std::uint64_t file_position(std::FILE* file);
 void write_atomic(const std::string& path, const std::string& content);
-int run_process(const std::vector<std::string>& arguments);
+// Publish a completed file on the same filesystem, refusing to replace any destination.
+void publish_file(const std::string& temporary, const std::string& destination);
+int run_process(const std::vector<std::string>& arguments, bool background = false,
+    const std::string& log = std::string());
 // Prefer a bundled encoder next to this executable; otherwise allow PATH lookup.
 std::string default_ffmpeg_path();
 #ifdef _WIN32

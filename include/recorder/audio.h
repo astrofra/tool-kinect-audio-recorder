@@ -37,6 +37,8 @@ struct RecordOptions {
     double duration_seconds; // Zero means until Stop.
     unsigned segment_seconds;
     bool fast;
+    bool encode_depth;
+    std::string ffmpeg; // Empty selects the bundled encoder, then PATH.
     RecordOptions();
 };
 void validate_options(const RecordOptions& options);

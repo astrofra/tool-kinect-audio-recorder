@@ -54,6 +54,8 @@ void usage() {
         "  --amplitude 0..1         Simulation peak scale, default 0.25\n"
         "  --depth off|gradient|noise Simulated 512x424 uint16 depth at 30 Hz (default off)\n"
         "  --segment-seconds N      Audio/depth rotation interval, default 60\n"
+        "  --encode-depth           Queue finalized depth + audio as video/*.mkv\n"
+        "  --ffmpeg PATH            Encoder override for --encode-depth\n"
         "  --fast                   Unpaced simulation, requires finite duration\n";
 }
 int run(const std::vector<std::string>& args) {
@@ -90,6 +92,7 @@ int run(const std::vector<std::string>& args) {
         const std::string key = args[i];
         if (key == "--help") { usage(); return 0; }
         if (key == "--fast") { o.fast = true; continue; }
+        if (key == "--encode-depth") { o.encode_depth = true; continue; }
         if (++i == args.size()) throw std::invalid_argument("Missing value for " + key);
         const std::string& v = args[i];
         if (key == "--output") o.output = v;
@@ -98,6 +101,10 @@ int run(const std::vector<std::string>& args) {
         else if (key == "--device") o.device_id = v;
         else if (key == "--segment-seconds") o.segment_seconds = integer(v);
         else if (key == "--depth") o.depth_pattern = v;
+        else if (key == "--ffmpeg") {
+            if (v.empty()) throw std::invalid_argument("FFmpeg path must not be empty");
+            o.ffmpeg = v;
+        }
         else if (key == "--sample-rate") { o.sample_rate = integer(v); simulation_options = true; }
         else if (key == "--channels") { o.channels = integer(v); simulation_options = true; }
         else if (key == "--signal") { o.signal = v; simulation_options = true; }
@@ -107,6 +114,7 @@ int run(const std::vector<std::string>& args) {
     }
     if (o.source == "wasapi" && simulation_options) throw std::invalid_argument("WASAPI records its native mix format; simulation controls do not apply");
     if (o.source == "simulate" && !o.device_id.empty()) throw std::invalid_argument("--device applies only to WASAPI");
+    if (!o.ffmpeg.empty() && !o.encode_depth) throw std::invalid_argument("record --ffmpeg requires --encode-depth");
     std::signal(SIGINT, on_signal); std::signal(SIGTERM, on_signal);
 #ifdef _WIN32
     SetConsoleCtrlHandler(console_handler, TRUE);
@@ -127,6 +135,17 @@ int run(const std::vector<std::string>& args) {
               << s.format.sample_rate << " Hz, " << std::fixed << std::setprecision(3)
               << static_cast<double>(s.frames) / s.format.sample_rate << " seconds\n";
     if (o.depth_pattern != "off") std::cout << s.depth_frames << " depth frames (512x424, 30 Hz, uint16 millimetres)\n";
+    if (o.encode_depth) {
+        std::cout << "Capture finalized; draining background encodings...\n" << std::flush;
+        recorder.wait_for_encodings();
+        const recorder::EncodingStatus encoding = recorder.encoding_status();
+        std::cout << "Encoding: " << encoding.completed << " completed, " << encoding.failed << " failed\n";
+        if (!encoding.last_error.empty()) std::cerr << encoding.last_error << '\n';
+        if (encoding.failed) {
+            if (!s.error.empty()) std::cerr << s.error << '\n';
+            return 1;
+        }
+    }
     if (!s.error.empty()) { std::cerr << s.error << '\n'; return 1; }
     return 0;
 }

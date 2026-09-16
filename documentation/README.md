@@ -4,7 +4,7 @@ Research date: **16 September 2026**. Status: **proposed specification, before h
 
 Implementation has started with a C++11 audio recorder. See [the implemented audio milestone](audio-implementation.md) for current capabilities and the [root README](../README.md) for build/run instructions. The design documents below describe the complete target, not a claim that every feature is implemented.
 
-The next implemented milestone adds [simulated depth capture, preview and lossless FFV1 export](depth-implementation.md). It requires no Kinect hardware; physical sensor integration remains pending.
+The next implemented milestone adds [simulated depth capture, preview, lossless FFV1 export and a sequential background encoding queue](depth-implementation.md). It requires no Kinect hardware; physical sensor integration remains pending.
 
 The application records a Kinect v2 depth stream and an external microphone on a Windows PC, then presents the interview as an animated, ghostlike point cloud with synchronized sound. Capture is native; the final publication target is an ordinary web browser. A command-line workflow renders timecoded video proxies for conventional editing and rebuilds a Kinect/audio recording from the exported XML edit list.
 

@@ -19,6 +19,14 @@ new recording. It remains visible while scrolling the controls or take history.
 as alternatives. Record captures the simulated 512 x 424, 30 Hz, 16-bit depth map
 alongside audio and displays a false-color preview. No Kinect driver is needed.
 
+**Encode finished segments to Matroska in background** is enabled by default.
+After each segment closes (every 60 seconds, or at Stop), its depth and audio are
+queued into `video/000000.mkv`, etc. Only one encoding runs at a time, with reduced
+CPU priority and two codec threads. The queue appears above the depth preview.
+You can start a new take while earlier segments encode. Closing the window waits
+for the queue with the interface still responsive; **Keep window open** cancels
+closing. Original depth, WAV and timing files are always kept.
+
 From PowerShell in this folder:
 
 ```powershell
@@ -42,6 +50,7 @@ To record depth from the CLI and optionally export one segment as lossless video
 
 ```powershell
 .\recording_tool.exe record --output recordings\depth-test --duration 10 --depth gradient
+.\recording_tool.exe record --output recordings\auto-test --duration 65 --depth gradient --encode-depth
 .\recording_tool.exe export-depth --input recordings\depth-test\depth\000000.kd16 --audio recordings\depth-test\audio\000000.wav --output recordings\depth-test\depth.mkv
 ```
 
@@ -53,6 +62,16 @@ used as a fallback only when the bundled binary is absent. Choose the WAV with t
 number and take as the depth file. The command exports one finalized segment at a
 time, rejects existing output files and reports encoder errors. Original timing
 journals remain the authority for the complete take.
+
+The CLI's `--encode-depth` mode waits for all queued jobs before exiting and
+returns an error if any encoding failed, even when capture itself succeeded.
+Background jobs write `.mkv.part` first, then publish `.mkv` only after success.
+Each attempted job has a `.mkv.json` status and `.mkv.log` encoder diagnostics
+when those files can be written. Failed jobs do not stop capture or later jobs.
+The queue is in memory; it is not automatically resumed after a crash or forced
+exit. Re-export missing videos from the retained originals using `export-depth`.
+CPU priority does not eliminate disk contention: test sustained recordings on
+the intended machine. Uncheck automatic encoding before the next take if needed.
 
 ## Package contents
 

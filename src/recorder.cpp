@@ -49,10 +49,10 @@ private:
 struct AudioFile { std::string path; std::uint64_t start, count; };
 class SessionWriter {
 public:
-    SessionWriter(const RecordOptions& o, AudioFormat f, const AudioSource& source, std::uint64_t origin)
+    SessionWriter(const RecordOptions& o, AudioFormat f, const AudioSource& source, std::uint64_t origin, EncodingQueue& encodings)
         : options_(o), format_(f), source_name_(source.name()), device_id_(source.device_id()),
           origin_(origin), frames_(0), packets_(0), timestamp_errors_(0), checkpoint_frames_(0),
-          timing_(0), events_(0), created_(utc_now()) {
+          timing_(0), events_(0), created_(utc_now()), encodings_(encodings), finalized_audio_(0), submitted_(0) {
         create_new_directory(o.output);
         create_directories(path_join(o.output, "audio"));
         create_directories(path_join(o.output, "timing"));
@@ -75,7 +75,7 @@ public:
         if (packet.flags & TimestampError) ++timestamp_errors_;
         while (offset < packet_frames) {
             if (!wav_ || wav_->frames() == segment_frames) {
-                if (wav_) wav_->close();
+                if (wav_) { wav_->close(); ++finalized_audio_; }
                 std::ostringstream name;
                 name << "audio/" << std::setw(6) << std::setfill('0') << files_.size() << ".wav";
                 wav_.reset(new WavWriter(path_join(options_.output, name.str()), format_));
@@ -104,6 +104,7 @@ public:
         }
         ++packets_;
         if (depth_) depth_->advance(frames_);
+        queue_finalized_segments();
         if (frames_ - checkpoint_frames_ >= format_.sample_rate) checkpoint();
     }
     void finish(const std::string& error, bool writer_healthy) {
@@ -111,11 +112,26 @@ public:
         // A failed write may leave unmatched payload/timing bytes. Retain the previous
         // known-good checkpoint instead of claiming the tail is mutually consistent.
         if (writer_healthy) checkpoint();
-        if (wav_) wav_->close();
+        if (wav_) { wav_->close(); ++finalized_audio_; }
         if (depth_ && writer_healthy) depth_->finish();
+        if (writer_healthy) queue_finalized_segments();
         manifest(error.empty() ? "complete" : "interrupted", error);
     }
 private:
+    void queue_finalized_segments() {
+        if (!depth_ || !options_.encode_depth) return;
+        const std::size_t ready = std::min(finalized_audio_, depth_->finalized_segments());
+        while (submitted_ < ready) {
+            std::ostringstream stem; stem << std::setw(6) << std::setfill('0') << submitted_;
+            EncodingJob job;
+            job.depth = path_join(options_.output, "depth/" + stem.str() + ".kd16");
+            job.audio = path_join(options_.output, "audio/" + stem.str() + ".wav");
+            job.output = path_join(options_.output, "video/" + stem.str() + ".mkv");
+            job.ffmpeg = options_.ffmpeg;
+            encodings_.enqueue(job); // Failure is reported separately; never stops capture.
+            ++submitted_;
+        }
+    }
     static void write_text(std::FILE* file, const std::string& text) {
         if (std::fwrite(text.data(), 1, text.size(), file) != text.size()) throw std::runtime_error("Timing log write failed");
     }
@@ -156,7 +172,9 @@ private:
             m << "\n    {\"path\": " << json_string(files_[i].path) << ", \"first_stored_frame\": " << files_[i].start
               << ", \"frames\": " << files_[i].count << '}';
         }
-        m << "\n  ],\n  \"depth\": " << (depth_ ? depth_->json() : "null") << "\n}\n";
+        m << "\n  ],\n  \"depth\": " << (depth_ ? depth_->json() : "null")
+          << ",\n  \"background_encoding\": {\"enabled\":" << (options_.encode_depth ? "true" : "false")
+          << ",\"directory\":\"video\",\"codec\":\"ffv1\"}\n}\n";
         write_atomic(path_join(options_.output, "manifest.json"), m.str());
     }
     RecordOptions options_;
@@ -169,13 +187,15 @@ private:
     std::vector<AudioFile> files_;
     std::unique_ptr<WavWriter> wav_;
     std::unique_ptr<DepthWriter> depth_;
+    EncodingQueue& encodings_;
+    std::size_t finalized_audio_, submitted_;
 };
 }
 
 RecorderStatus::RecorderStatus() : state("Idle"), frames(0), packets(0), timestamp_errors(0), depth_frames(0), active(false) {
     peak[0] = peak[1] = rms[0] = rms[1] = 0;
 }
-Recorder::Recorder() : stop_(false) {}
+Recorder::Recorder(EncodingQueue::Executor encoder) : stop_(false), encodings_(encoder) {}
 Recorder::~Recorder() { request_stop(); wait(); }
 RecorderStatus Recorder::status() const { std::lock_guard<std::mutex> lock(mutex_); return status_; }
 void Recorder::request_stop() { stop_ = true; }
@@ -210,7 +230,7 @@ void Recorder::run(RecordOptions options, std::unique_ptr<AudioSource> source) {
             throw std::runtime_error("Audio queue would exceed 64 MiB");
         queue.reset(new PacketQueue(slots, packet_samples));
         AudioPacket packet; packet.samples.reserve(packet_samples);
-        writer.reset(new SessionWriter(options, format, *source, clock_100ns()));
+        writer.reset(new SessionWriter(options, format, *source, clock_100ns(), encodings_));
         { std::lock_guard<std::mutex> lock(mutex_); status_.format = format; status_.source_name = source->name(); }
         disk_thread = std::thread([&, packet_samples] {
             try {

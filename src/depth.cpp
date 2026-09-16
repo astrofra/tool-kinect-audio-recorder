@@ -63,7 +63,7 @@ void generate_depth(DepthFrame& frame, const std::string& pattern) {
 }
 DepthWriter::DepthWriter(const std::string& directory, const std::string& pattern, unsigned rate, unsigned segment_seconds)
     : directory_(directory), pattern_(pattern), rate_(rate), segment_seconds_(segment_seconds), frames_(0),
-      file_(0), timing_(0), bytes_(DepthWidth * DepthHeight * 2) {
+      finalized_segments_(0), file_(0), timing_(0), bytes_(DepthWidth * DepthHeight * 2) {
     if (!rate_ || !segment_seconds_ || (pattern_ != "gradient" && pattern_ != "noise"))
         throw std::invalid_argument("Invalid depth writer settings");
     create_directories(path_join(directory_, "depth"));
@@ -89,6 +89,7 @@ void DepthWriter::close_segment() {
     header(true); sync_file(file_);
     std::FILE* closing = file_; file_ = 0;
     if (std::fclose(closing)) throw std::runtime_error("Depth file close failed");
+    ++finalized_segments_;
 }
 void DepthWriter::advance(std::uint64_t audio_frames) {
     const std::uint64_t target = depth_frames_for_audio(audio_frames, rate_);
@@ -135,7 +136,7 @@ std::string DepthWriter::json() const {
 }
 
 void export_depth_video(const std::string& input, const std::string& output,
-        const std::string& audio, const std::string& ffmpeg) {
+        const std::string& audio, const std::string& ffmpeg, bool background, const std::string& log) {
     if (input.empty() || output.empty() || ffmpeg.empty()) throw std::invalid_argument("Export requires input, output and FFmpeg");
     // Some FFmpeg versions return success for -n refusal; check before launching as well.
     if (path_exists(output)) throw std::runtime_error("Export output already exists: " + output);
@@ -178,8 +179,12 @@ void export_depth_video(const std::string& input, const std::string& output,
         "-f", "rawvideo", "-pixel_format", "gray16le", "-video_size", "512x424", "-framerate", "30",
         "-skip_initial_bytes", "64", "-i", input };
     if (!audio.empty()) { args.push_back("-i"); args.push_back(audio); }
+    if (background) {
+        args.push_back("-filter_threads"); args.push_back("1");
+        args.push_back("-filter_complex_threads"); args.push_back("1");
+    }
     const char* video[] = { "-map", "0:v:0", "-c:v", "ffv1", "-level", "3", "-coder", "1", "-context", "1",
-        "-g", "1", "-slicecrc", "1", "-threads", "4", "-pix_fmt", "+gray16le" };
+        "-g", "1", "-slicecrc", "1", "-threads", background ? "2" : "4", "-pix_fmt", "+gray16le" };
     args.insert(args.end(), video, video + sizeof(video) / sizeof(video[0]));
     if (!audio.empty()) {
         args.push_back("-map"); args.push_back("1:a:0"); args.push_back("-c:a"); args.push_back("pcm_f32le");
@@ -188,7 +193,7 @@ void export_depth_video(const std::string& input, const std::string& output,
     args.push_back("-metadata"); args.push_back("DEPTH_INVALID_VALUE=0");
     args.push_back("-metadata"); args.push_back("SOURCE_FIRST_FRAME=" + std::to_string(get(b + 32, 8)));
     args.push_back("-f"); args.push_back("matroska"); args.push_back(output);
-    const int result = run_process(args);
+    const int result = run_process(args, background, log);
     if (result) throw std::runtime_error("FFmpeg export failed (exit " + std::to_string(result) + "); any partial output is incomplete");
     std::unique_ptr<std::FILE, int(*)(std::FILE*)> encoded(open_file(output, "rb"), std::fclose);
     unsigned char magic[4];

@@ -1,6 +1,7 @@
 #pragma once
 #include "recorder/audio.h"
 #include "recorder/depth.h"
+#include "recorder/encoding_queue.h"
 #include <mutex>
 #include <thread>
 
@@ -24,7 +25,7 @@ struct RecorderStatus {
 
 class Recorder {
 public:
-    Recorder();
+    explicit Recorder(EncodingQueue::Executor encoder = EncodingQueue::Executor());
     ~Recorder();
     // start/wait belong to the controller thread; status/request_stop may be called concurrently.
     // A supplied source is opened/read/destroyed on the recording thread.
@@ -32,6 +33,8 @@ public:
     void request_stop();
     void wait();
     RecorderStatus status() const;
+    EncodingStatus encoding_status() const { return encodings_.status(); }
+    void wait_for_encodings() { encodings_.wait(); }
 private:
     Recorder(const Recorder&);
     Recorder& operator=(const Recorder&);
@@ -40,5 +43,6 @@ private:
     RecorderStatus status_;
     std::atomic<bool> stop_;
     std::thread thread_;
+    EncodingQueue encodings_; // Survives Stop/start; wait() joins acquisition only.
 };
 }

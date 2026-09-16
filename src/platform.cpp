@@ -170,6 +170,17 @@ std::uint64_t file_position(std::FILE* file) {
     if (position < 0) throw std::runtime_error("Cannot read file position");
     return static_cast<std::uint64_t>(position);
 }
+void publish_file(const std::string& temporary, const std::string& destination) {
+#ifdef _WIN32
+    if (!MoveFileExW(from_utf8(temporary).c_str(), from_utf8(destination).c_str(), MOVEFILE_WRITE_THROUGH))
+        throw std::runtime_error("Cannot publish video without replacing an existing file: " + destination);
+#else
+    // link() publishes atomically and fails if the destination exists, unlike rename().
+    if (link(temporary.c_str(), destination.c_str()))
+        throw std::runtime_error("Cannot publish video: " + destination + ": " + system_error());
+    if (unlink(temporary.c_str())) throw std::runtime_error("Video published, but temporary link could not be removed");
+#endif
+}
 void write_atomic(const std::string& path, const std::string& content) {
     const std::string temp = path + ".tmp";
     std::FILE* file = open_file(temp, "wb");

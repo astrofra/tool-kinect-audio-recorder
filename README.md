@@ -32,6 +32,8 @@ A large elapsed timecode stays visible at the top: `HH:MM:SS:FF`, at **30 fps no
 
 The **Depth source** selector defaults to a simulated moving gradient; noise and audio-only modes are also available. The GUI previews the latest stored depth image. Capture uses 512 x 424 uint16 millimetres at 30 Hz, driven by the audio sample timeline.
 
+**Encode finished segments to Matroska in background** is enabled by default in the GUI. Each closed depth/audio pair is queued as `video/000000.mkv`, etc. One worker runs one FFmpeg process at a time, at reduced CPU priority with two codec threads. The queue panel shows pending, completed and failed jobs across takes. Stop requests capture finalization without waiting for encoding; you can start another take as soon as capture finishes. Closing the window drains the queue with the interface still responsive. The raw recordings are always retained.
+
 ## Command line
 
 ```powershell
@@ -53,11 +55,14 @@ Use `--device "<endpoint ID>"` to select a specific microphone. WASAPI uses the 
 ```powershell
 .\release\recording_tool.exe record --output recordings\depth-test --duration 10 --depth gradient
 
+# Capture and automatically encode each finished segment in the background.
+.\release\recording_tool.exe record --output recordings\auto-test --duration 65 --depth gradient --encode-depth
+
 # Uses the bundled FFmpeg: export one depth segment with its matching audio.
 .\release\recording_tool.exe export-depth --input recordings\depth-test\depth\000000.kd16 --audio recordings\depth-test\audio\000000.wav --output recordings\depth-test\depth-video.mkv
 ```
 
-Use `--depth noise` for animated noise, or `--depth off` for audio only (the CLI default). Native recording uses raw 16-bit segments and timing journals; **FFV1/gray16le in Matroska** preserves depth values exactly. Encoding runs after capture on the CPU. Export prefers `extern/ffmpeg/ffmpeg.exe` relative to the recorder executable, then PATH; `--ffmpeg PATH` explicitly overrides both. The Windows release includes a minimal FFmpeg 9.0.1 for FFV1/rawvideo/PCM, with its LGPL notices and complete corresponding FFmpeg source. See [its build recipe and provenance](extern/ffmpeg/README.md). Export validates one finalized segment at a time and never overwrites an existing output. See [the depth implementation](documentation/depth-implementation.md) for timing, format, measurements and limitations.
+Use `--depth noise` for animated noise, or `--depth off` for audio only (the CLI default). Native recording uses raw 16-bit segments and timing journals; **FFV1/gray16le in Matroska** preserves depth values exactly. The CLI opts into background encoding with `--encode-depth` and waits for the queue before exiting; `--ffmpeg PATH` selects an encoder for that queue or for manual export. Export prefers `extern/ffmpeg/ffmpeg.exe` relative to the recorder executable, then PATH. The Windows release includes a minimal FFmpeg 9.0.1 for FFV1/rawvideo/PCM, with its LGPL notices and complete corresponding FFmpeg source. See [its build recipe and provenance](extern/ffmpeg/README.md). Export validates one finalized segment at a time and never overwrites an existing output. See [the depth implementation](documentation/depth-implementation.md) for timing, format, measurements and limitations.
 
 ## Portable build without GUI dependencies
 

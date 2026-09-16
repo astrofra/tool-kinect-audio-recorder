@@ -138,7 +138,7 @@ independently of the working directory. `--ffmpeg C:\path\ffmpeg.exe` overrides
 automatic selection; PATH is a fallback only when no bundled binary exists.
 FFmpeg is launched directly with an argument list, without a shell; paths with
 spaces, Unicode and shell metacharacters are supported. Capture and preview still
-work independently of the encoder. Its errors are reported to the console.
+work independently of the encoder. Manual export errors are reported to the console.
 
 The bundle includes LGPL notices, the exact unmodified source archive, SHA-256
 pins, MSVC build scripts and generated configuration files. It is rebuilt from
@@ -157,6 +157,67 @@ sensor observations or the precision of the rational frame index.
 This is an archival/data-video export, not the future rendered video proxy or
 browser delivery format. It does not yet join multiple segments, add timecode
 tracks, render geometry, or implement DaVinci Resolve XML conform.
+
+## Background encoding queue
+
+The GUI enables **Encode finished segments to Matroska in background** by default.
+The CLI enables the same behavior with `record --depth gradient --encode-depth`;
+`record --ffmpeg PATH --encode-depth` overrides automatic encoder selection.
+Audio-only capture and manual export do not start an encoding worker.
+
+The disk writer submits a job only after **both** the matching WAV and KD16 files
+have been finalized and closed. Rotation submits full segments during capture;
+Stop submits the last partial pair after draining audio and depth. The default
+segment interval remains 60 seconds. No encoder reads an actively written segment.
+
+One application-owned C++11 `std::thread`, one mutex, one condition variable and
+a FIFO of paths implement the queue. There is no thread pool and no frame data in
+the queue. The mutex is released before any file I/O or subprocess work. One
+FFmpeg child runs at a time across successive takes in the same recorder instance.
+Independent application instances have independent queues.
+
+Background FFV1 encoding uses two codec threads and one thread per filter pool.
+FFmpeg has additional internal I/O threads; this is not a two-thread limit for the
+whole process. Windows creates the child at `IDLE_PRIORITY_CLASS`; POSIX attempts
+to lower its priority with `setpriority(..., 10)` after spawning it. Only the child
+is affected. [Windows documents CPU priority separately from I/O contention](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-setpriorityclass):
+this is resource moderation, not a promise of zero capture impact. Disk throughput,
+free space and long-session behavior still require testing on the intended machine.
+The [FFmpeg options](https://ffmpeg.org/ffmpeg.html) restrict codec/filter parallelism;
+no GPU encoder or additional dependency is introduced.
+
+The queue panel displays the current path, waiting count, successes and failures
+across the application session. Stop does not wait for encoding. Once capture has
+finalized, a new take can start while earlier jobs continue. On orderly window
+close, capture stops and the GUI keeps rendering until the queue drains; **Keep
+window open** cancels closing. The CLI drains the queue before exit. A failed job
+does not stop capture or later jobs; the CLI returns nonzero if any job failed.
+The capture manifest's `state` still describes capture, independently of encoding.
+
+Background outputs are derived artifacts under the take's `video/` directory:
+
+```text
+video/000000.mkv        # Published only after successful encoding
+video/000000.mkv.json   # encoding / complete / failed, source paths and error
+video/000000.mkv.log    # FFmpeg stdout/stderr (empty on success is normal)
+video/000000.mkv.part   # Present while encoding; retained on failure if created
+```
+
+FFmpeg must exit successfully and produce a Matroska header before the `.part`
+file is published under its final name. Publication refuses to replace any existing
+destination. This is not a full decode verification on every job; byte-exact codec
+round trips are checked by the test suite. Originals and timing journals are never
+deleted. Filesystem failures are reported even when status/log files cannot be
+written. The manifest records whether background encoding was enabled for the take.
+
+The pending queue is capped at 1024 jobs plus one running job. If it fills, new
+jobs are rejected and counted as failures without waiting or stopping capture;
+their raw segments remain available for manual export. Pending jobs live in memory,
+and this version has no automatic restart recovery, retries or encoder cancellation.
+Forced exit/crash can leave missing videos or `.part` files; recover by manually
+exporting the corresponding finalized raw pairs to new output paths. The normal
+close path waits for an encoder to return; a hung external encoder requires external
+intervention. The queue is not a file watcher for earlier takes or external files.
 
 ## CPU versus GPU
 
@@ -179,7 +240,7 @@ Initial local measurements on Windows/MSVC x64 used the external FFmpeg 7.0.2
 Both real-time recordings stored exactly 144,000 audio sample frames at 48 kHz.
 These short, cached, synthetic measurements are not Kinect compression ratios,
 cross-machine performance promises or long-session endurance qualification.
-Compression remains offline in this milestone; production capture still needs
+Background encoding is now available; production capture still needs
 measurements to choose between FFV1 and the previously proposed Zstandard chunks.
 
 ## Validation
@@ -197,6 +258,14 @@ The package test also copies the recorder and encoder into a directory with spac
 and Unicode characters, clears PATH, and exports from a different working
 directory. It verifies byte-exact depth recovery and explicit `--ffmpeg` precedence.
 The release build runs codec tests using its newly compiled bundled encoder.
+
+Queue tests block an injected encoder while finalizing and starting another take,
+check FIFO execution, a single concurrent job, bounded overflow, continued processing
+after failure and orderly destructor drain. A subprocess failure test checks the
+Windows child priority and verifies that incomplete output is never published and
+existing destinations are preserved. Integration tests encode rotated segments
+during real-time simulation, compare all decoded depth/PCM bytes, check the final
+partial segment and verify that a missing encoder leaves capture complete.
 
 The hidden-window GUI smoke test now records both streams and captures the depth
 preview alongside the timecode. Local visual inspection confirmed the preview.
