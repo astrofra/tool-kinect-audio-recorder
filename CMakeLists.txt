@@ -10,7 +10,7 @@ include(GNUInstallDirs)
 find_package(Threads REQUIRED)
 
 add_library(recorder_core
-    src/platform.cpp src/audio.cpp src/wav_writer.cpp src/recorder.cpp)
+    src/platform.cpp src/process.cpp src/audio.cpp src/depth.cpp src/wav_writer.cpp src/recorder.cpp)
 target_include_directories(recorder_core PUBLIC include)
 target_link_libraries(recorder_core PUBLIC Threads::Threads)
 if(WIN32)
@@ -19,6 +19,7 @@ if(WIN32)
     target_link_libraries(recorder_core PRIVATE ole32 uuid)
 else()
     target_sources(recorder_core PRIVATE src/audio_devices_stub.cpp)
+    target_compile_definitions(recorder_core PRIVATE _FILE_OFFSET_BITS=64)
 endif()
 if(MSVC)
     target_compile_options(recorder_core PRIVATE /W4 /utf-8)
@@ -65,6 +66,8 @@ if(BUILD_TESTING)
     if(Python3_Interpreter_FOUND)
         add_test(NAME recorder_files COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration.py $<TARGET_FILE:recording_tool>)
+        add_test(NAME recorder_depth COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/depth_integration.py $<TARGET_FILE:recording_tool>)
     endif()
 endif()
 

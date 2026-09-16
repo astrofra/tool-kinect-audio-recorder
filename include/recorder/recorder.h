@@ -1,5 +1,6 @@
 #pragma once
 #include "recorder/audio.h"
+#include "recorder/depth.h"
 #include <mutex>
 #include <thread>
 
@@ -13,6 +14,8 @@ struct RecorderStatus {
     std::uint64_t frames;
     std::uint64_t packets;
     std::uint64_t timestamp_errors;
+    std::uint64_t depth_frames;
+    std::shared_ptr<const DepthFrame> depth_preview;
     float peak[2];
     float rms[2];
     bool active;

@@ -15,6 +15,10 @@ The large counter at the top displays elapsed recorded audio as `HH:MM:SS:FF`
 at 30 fps non-drop. It retains the final duration after Stop and resets for each
 new recording. It remains visible while scrolling the controls or take history.
 
+**Depth source** defaults to a moving gradient, with animated noise or audio-only
+as alternatives. Record captures the simulated 512 x 424, 30 Hz, 16-bit depth map
+alongside audio and displays a false-color preview. No Kinect driver is needed.
+
 From PowerShell in this folder:
 
 ```powershell
@@ -29,9 +33,24 @@ From PowerShell in this folder:
 ```
 
 Use a different output folder for each take. Each take contains segmented float32
-WAV audio, a JSON manifest, and timing journals. Simulation generates samples but
-does not play them through speakers. Kinect capture, playback, video proxies, and
-DaVinci Resolve XML conform are not implemented in this audio milestone.
+WAV audio, a JSON manifest, and timing journals, plus raw `.kd16` segments when
+depth is enabled. Simulation generates samples but does not play them through
+speakers. Physical Kinect capture, playback, rendered video proxies, and DaVinci
+Resolve XML conform are not implemented yet.
+
+To record depth from the CLI and optionally export one segment as lossless video:
+
+```powershell
+.\recording_tool.exe record --output recordings\depth-test --duration 10 --depth gradient
+.\recording_tool.exe export-depth --input recordings\depth-test\depth\000000.kd16 --audio recordings\depth-test\audio\000000.wav --output recordings\depth-test\depth.mkv
+```
+
+Export uses FFV1 `gray16le` and optional PCM audio in Matroska. It requires an
+external FFmpeg executable on PATH, or `--ffmpeg PATH`; FFmpeg is not bundled.
+Capture and preview do not require FFmpeg. Choose the WAV with the same segment
+number and take as the depth file. The command exports one finalized segment at a
+time, rejects existing output files and reports encoder errors. Original timing
+journals remain the authority for the complete take.
 
 ## Package contents
 

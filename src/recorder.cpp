@@ -56,6 +56,7 @@ public:
         create_new_directory(o.output);
         create_directories(path_join(o.output, "audio"));
         create_directories(path_join(o.output, "timing"));
+        if (o.depth_pattern != "off") depth_.reset(new DepthWriter(o.output, o.depth_pattern, f.sample_rate, o.segment_seconds));
         manifest("recording", "");
         timing_ = open_file(path_join(o.output, "timing/audio-packets.jsonl"), "wb");
         try { events_ = open_file(path_join(o.output, "timing/events.jsonl"), "wb"); }
@@ -65,6 +66,8 @@ public:
     std::uint64_t frames() const { return frames_; }
     std::uint64_t packets() const { return packets_; }
     std::uint64_t timestamp_errors() const { return timestamp_errors_; }
+    std::uint64_t depth_frames() const { return depth_ ? depth_->frames() : 0; }
+    std::shared_ptr<const DepthFrame> depth_preview() const { return depth_ ? depth_->latest() : std::shared_ptr<const DepthFrame>(); }
     void write(const AudioPacket& packet) {
         const std::uint64_t packet_frames = packet.samples.size() / format_.channels;
         const std::uint64_t segment_frames = static_cast<std::uint64_t>(options_.segment_seconds) * format_.sample_rate;
@@ -100,6 +103,7 @@ public:
             write_text(events_, event.str());
         }
         ++packets_;
+        if (depth_) depth_->advance(frames_);
         if (frames_ - checkpoint_frames_ >= format_.sample_rate) checkpoint();
     }
     void finish(const std::string& error, bool writer_healthy) {
@@ -108,6 +112,7 @@ public:
         // known-good checkpoint instead of claiming the tail is mutually consistent.
         if (writer_healthy) checkpoint();
         if (wav_) wav_->close();
+        if (depth_ && writer_healthy) depth_->finish();
         manifest(error.empty() ? "complete" : "interrupted", error);
     }
 private:
@@ -116,10 +121,12 @@ private:
     }
     void checkpoint() {
         if (wav_) wav_->checkpoint();
+        if (depth_) depth_->checkpoint();
         sync_file(timing_); sync_file(events_);
         std::ostringstream c;
         c << "{\"schema\":1,\"committed_frames\":" << frames_ << ",\"committed_packets\":" << packets_
-          << ",\"timing_bytes\":" << file_position(timing_) << ",\"events_bytes\":" << file_position(events_) << "}\n";
+          << ",\"timing_bytes\":" << file_position(timing_) << ",\"events_bytes\":" << file_position(events_)
+          << ",\"depth_frames\":" << depth_frames() << ",\"depth_timing_bytes\":" << (depth_ ? depth_->timing_bytes() : 0) << "}\n";
         write_atomic(path_join(options_.output, "checkpoint.json"), c.str());
         manifest("recording", "");
         checkpoint_frames_ = frames_;
@@ -128,8 +135,9 @@ private:
         std::ostringstream m;
         m.imbue(std::locale::classic());
         m << std::setprecision(17)
-          << "{\n  \"schema\": \"kinect-audio-prototype/1\",\n  \"application\": \"0.1.0\",\n"
-          << "  \"kind\": \"audio-capture\",\n  \"created_utc\": " << json_string(created_)
+          << "{\n  \"schema\": " << json_string(depth_ ? "kinect-depth-audio-prototype/1" : "kinect-audio-prototype/1")
+          << ",\n  \"application\": \"0.1.0\",\n  \"kind\": " << json_string(depth_ ? "simulated-depth-audio-capture" : "audio-capture")
+          << ",\n  \"created_utc\": " << json_string(created_)
           << ",\n  \"state\": " << json_string(state) << ",\n  \"error\": " << json_string(error)
           << ",\n  \"source\": " << json_string(options_.source) << ",\n  \"source_name\": " << json_string(source_name_)
           << ",\n  \"device_id\": " << json_string(device_id_)
@@ -148,7 +156,7 @@ private:
             m << "\n    {\"path\": " << json_string(files_[i].path) << ", \"first_stored_frame\": " << files_[i].start
               << ", \"frames\": " << files_[i].count << '}';
         }
-        m << "\n  ]\n}\n";
+        m << "\n  ],\n  \"depth\": " << (depth_ ? depth_->json() : "null") << "\n}\n";
         write_atomic(path_join(options_.output, "manifest.json"), m.str());
     }
     RecordOptions options_;
@@ -160,10 +168,11 @@ private:
     std::string created_;
     std::vector<AudioFile> files_;
     std::unique_ptr<WavWriter> wav_;
+    std::unique_ptr<DepthWriter> depth_;
 };
 }
 
-RecorderStatus::RecorderStatus() : state("Idle"), frames(0), packets(0), timestamp_errors(0), active(false) {
+RecorderStatus::RecorderStatus() : state("Idle"), frames(0), packets(0), timestamp_errors(0), depth_frames(0), active(false) {
     peak[0] = peak[1] = rms[0] = rms[1] = 0;
 }
 Recorder::Recorder() : stop_(false) {}
@@ -211,6 +220,7 @@ void Recorder::run(RecordOptions options, std::unique_ptr<AudioSource> source) {
                     std::lock_guard<std::mutex> lock(mutex_);
                     status_.frames = writer->frames(); status_.packets = writer->packets();
                     status_.timestamp_errors = writer->timestamp_errors();
+                    status_.depth_frames = writer->depth_frames(); status_.depth_preview = writer->depth_preview();
                 }
             } catch (const std::exception& e) { writer_error = e.what(); stop_ = true; queue->abort(); }
         });
@@ -254,7 +264,8 @@ void Recorder::run(RecordOptions options, std::unique_ptr<AudioSource> source) {
     if (!writer_error.empty()) error = writer_error;
     if (writer) { try { writer->finish(error, writer_error.empty()); } catch (const std::exception& e) { error += (error.empty() ? "" : "; ") + std::string(e.what()); } }
     { std::lock_guard<std::mutex> lock(mutex_);
-      if (writer) { status_.frames = writer->frames(); status_.packets = writer->packets(); status_.timestamp_errors = writer->timestamp_errors(); }
+      if (writer) { status_.frames = writer->frames(); status_.packets = writer->packets(); status_.timestamp_errors = writer->timestamp_errors();
+          status_.depth_frames = writer->depth_frames(); status_.depth_preview = writer->depth_preview(); }
       status_.error = error; status_.state = error.empty() ? "Complete" : "Interrupted"; status_.active = false; }
 }
 }

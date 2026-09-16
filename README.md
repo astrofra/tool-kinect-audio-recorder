@@ -1,6 +1,6 @@
 # Kinect Audio Recorder
 
-A Windows interview recorder, starting with audio capture and hardware-free audio simulation. The capture core, simulator, WAV writer, and CLI use **C++11** and CMake. The desktop interface uses **Dear ImGui + GLFW**. Kinect capture and the XML editing workflow are specified but not implemented yet.
+A Windows interview recorder with audio capture and hardware-free audio/depth simulation. The capture core, simulators, file writers, and CLI use **C++11** and CMake. The desktop interface uses **Dear ImGui + GLFW**. Physical Kinect capture and the XML editing workflow are specified but not implemented yet.
 
 ## Build on Windows
 
@@ -30,6 +30,8 @@ The GUI defaults to simulation. Choose a new take folder, press **Record**, then
 
 A large elapsed timecode stays visible at the top: `HH:MM:SS:FF`, at **30 fps non-drop**. It follows the stored audio sample count, keeps the final value after Stop, and resets for each new recording.
 
+The **Depth source** selector defaults to a simulated moving gradient; noise and audio-only modes are also available. The GUI previews the latest stored depth image. Capture uses 512 x 424 uint16 millimetres at 30 Hz, driven by the audio sample timeline.
+
 ## Command line
 
 ```powershell
@@ -46,6 +48,17 @@ A large elapsed timecode stays visible at the top: `HH:MM:SS:FF`, at **30 fps no
 
 Use `--device "<endpoint ID>"` to select a specific microphone. WASAPI uses the endpoint's native shared-mode sample rate and mono/stereo layout, displayed in the GUI and saved in the manifest. It does not silently switch devices. `--help` lists simulation and file-rotation options. Existing take directories are never overwritten.
 
+## Simulated depth and lossless video
+
+```powershell
+.\release\recording_tool.exe record --output recordings\depth-test --duration 10 --depth gradient
+
+# Optional FFmpeg on PATH: export one depth segment with its matching audio.
+.\release\recording_tool.exe export-depth --input recordings\depth-test\depth\000000.kd16 --audio recordings\depth-test\audio\000000.wav --output recordings\depth-test\depth-video.mkv
+```
+
+Use `--depth noise` for animated noise, or `--depth off` for audio only (the CLI default). Native recording uses raw 16-bit segments and timing journals; optional **FFV1/gray16le in Matroska** preserves depth values exactly. Encoding runs after capture on the CPU. FFmpeg is not bundled or required for recording; use `--ffmpeg PATH` if it is not on PATH. Export validates one finalized segment at a time and never overwrites an existing output. See [the depth implementation](documentation/depth-implementation.md) for timing, format, measurements and limitations.
+
 ## Portable build without GUI dependencies
 
 ```sh
@@ -59,5 +72,7 @@ The core build requires CMake 3.16+ and a C++11 compiler, with no downloaded lib
 ## Recording files
 
 Each take contains `manifest.json`, `checkpoint.json`, segmented `audio/*.wav` files, and `timing/*.jsonl` journals. Audio is uncompressed IEEE float32 PCM, rotated every 60 seconds by default. Packet metadata preserves sample positions, native timing, receipt-clock observations, and error flags for future Kinect synchronization.
+
+Depth-enabled takes additionally contain `depth/*.kd16` and `timing/depth-frames.jsonl`, rotating at the same interval. The last depth frame can extend less than one video frame beyond the audio end; audio samples are unchanged.
 
 See [the implemented audio milestone](documentation/audio-implementation.md) for format details, tests, and current limits, and [the design documentation](documentation/README.md) for the complete planned tool.

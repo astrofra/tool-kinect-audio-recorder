@@ -40,6 +40,12 @@ int main() {
         using namespace recorder;
         require(frames_to_100ns(44100, 44100) == 10000000, "44.1 kHz conversion");
         require(frames_to_100ns(48000ULL * 86400, 48000) == 864000000000ULL, "Long clock conversion");
+        require(depth_frames_for_audio(0, 48000) == 0, "No depth without audio");
+        require(depth_frames_for_audio(1, 48000) == 1, "Depth frame at timeline zero");
+        require(depth_frames_for_audio(1600, 48000) == 1, "Half-open exact frame boundary");
+        require(depth_frames_for_audio(1601, 48000) == 2, "Depth frame after boundary");
+        require(depth_frames_for_audio(8000, 8000) == 30, "Non-divisible sample/frame cadence");
+        require(depth_frames_for_audio(48000ULL * 86400, 48000) == 2592000, "Day-long depth clock");
         require(json_string("a\n\"\\\t") == "\"a\\u000a\\\"\\\\\\u0009\"", "JSON escaping");
         RecordOptions o; o.output = "unused"; o.signal = "sine"; o.frequency = 1000; o.amplitude = 0.5;
         require(std::abs(simulated_sample(o, 12, 0) - 0.5f) < 1e-6f, "Sine quarter cycle");
@@ -49,7 +55,7 @@ int main() {
         bool rejected = false; o.amplitude = 2;
         try { validate_options(o); } catch (const std::invalid_argument&) { rejected = true; }
         require(rejected, "Amplitude validation");
-        o.amplitude = 0.25; o.output = "test-stop-" + std::to_string(clock_ticks());
+        o.amplitude = 0.25; o.depth_pattern = "gradient"; o.output = "test-stop-" + std::to_string(clock_ticks());
         Recorder recorder; recorder.start(o);
         const std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
         while (recorder.status().frames < 480 && recorder.status().active && std::chrono::steady_clock::now() < deadline)
@@ -60,6 +66,8 @@ int main() {
         require(rejected, "Cannot start twice");
         recorder.request_stop(); recorder.wait();
         require(!recorder.status().active && recorder.status().state == "Complete", "Stop drains and finalizes");
+        require(recorder.status().depth_frames == depth_frames_for_audio(recorder.status().frames, 48000), "Stop keeps depth and audio aligned");
+        require(recorder.status().depth_preview.get() != 0, "Stored frame available to preview");
         // A new capture on the same Recorder must reset its state and reject overwriting a take.
         recorder.start(o); recorder.wait();
         require(recorder.status().state == "Interrupted", "Existing take cannot be overwritten");
@@ -67,6 +75,7 @@ int main() {
             o.output = "test-fault-" + std::to_string(clock_ticks()); o.fast = true; o.duration_seconds = 0.04;
             recorder.start(o, std::unique_ptr<AudioSource>(new FaultSource(mode))); recorder.wait();
             const RecorderStatus s = recorder.status();
+            require(s.depth_frames == depth_frames_for_audio(s.frames, s.format.sample_rate), "Fault drains both streams");
             if (mode == 0) require(s.state == "Interrupted" && s.frames == 960, "Gap stops capture and preserves queued prefix");
             if (mode == 1) require(s.state == "Complete" && s.frames == 1920 && s.timestamp_errors == 1, "Invalid timestamps retain samples and quality flags");
             if (mode == 2) require(s.state == "Interrupted" && s.frames == 1440, "Source exception drains queued audio");

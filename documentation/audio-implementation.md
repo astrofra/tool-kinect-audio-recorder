@@ -5,7 +5,7 @@ This document describes implemented behavior. The [product specification](specif
 ## Available components
 
 - `recording_tool`: record audio or enumerate Windows capture endpoints.
-- `audio_recorder`: optional Dear ImGui/GLFW interface with source selection, Record/Stop, meters, duration, take path, and current-session history.
+- `audio_recorder`: optional Dear ImGui/GLFW interface with source selection, Record/Stop, meters, timecode, take path, current-session history, and simulated depth preview.
 - `recorder_core`: portable source interface, deterministic simulator, bounded packet queue, background file writer, float32 WAV serialization, and recording state/control.
 - `WasapiSource`: Windows shared-mode, event-driven capture using native Windows SDK APIs. COM objects are created, used, and released on the capture thread.
 
@@ -38,6 +38,8 @@ WASAPI provides a device sample position and a correlated QPC value in 100 ns un
 The initial WASAPI discontinuity flag is retained without treating startup as mid-take loss. Subsequent discontinuities or valid device-position gaps interrupt the take after preserving the received packet and draining queued data. Timestamp-error packets retain their samples and are excluded from continuity comparisons. No packets for five seconds is an explicit capture failure, not a silently successful empty take.
 
 ## File contract
+
+Optional simulated depth capture adds a separate raster stream, schema and journal, documented in [the depth implementation](depth-implementation.md). The audio-only contract below remains supported.
 
 The schema is `kinect-audio-prototype/1`, intentionally distinguishable from the future complete Kinect archive. A typical take contains:
 
@@ -75,4 +77,4 @@ Local validation used Visual Studio 2022/MSVC x64 on Windows: both CTest suites 
 
 WASAPI enumeration is tested locally; physical microphone capture, hot-unplug behavior with real hardware, and long-session durability still need qualification. No hardware recording is claimed on the basis of simulated tests. Linux/macOS builds have not been run locally.
 
-Not yet implemented: live input preview before Record, audio monitoring/playback inside the app, a persistent searchable take library, selectable channels on multichannel devices, automatic recovery, disk-capacity preflight, Kinect capture, video proxies, XML conform, and web export. The interface and source/storage separation allow these to be added incrementally.
+Not yet implemented: live input preview before Record, audio monitoring/playback inside the app, a persistent searchable take library, selectable channels on multichannel devices, automatic recovery, disk-capacity preflight, physical Kinect capture, rendered video proxies, XML conform, and web export. Simulated depth and numerical-depth FFV1 export are available separately. The interface and source/storage separation allow these to be added incrementally.

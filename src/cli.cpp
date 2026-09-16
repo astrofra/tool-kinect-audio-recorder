@@ -36,9 +36,12 @@ unsigned integer(const std::string& text) {
     return static_cast<unsigned>(v);
 }
 void usage() {
-    std::cout << "Audio recorder (C++11)\n\n"
+    std::cout << "Depth + audio recorder (C++11)\n\n"
         "  recording_tool devices\n"
         "  recording_tool record [options]\n\n"
+        "  recording_tool export-depth --input SEGMENT.kd16 --output VIDEO.mkv\n"
+        "      [--audio MATCHING_SEGMENT.wav] [--ffmpeg PATH]\n"
+        "      Lossless FFV1/gray16le; FFmpeg is required only for export.\n\n"
         "  --source simulate|wasapi  Default: simulate\n"
         "  --output DIRECTORY       New take directory (never overwritten)\n"
         "  --duration SECONDS       Default: 10; 0 records until Ctrl+C\n"
@@ -48,7 +51,8 @@ void usage() {
         "  --signal markers|sine    Simulation, default markers\n"
         "  --frequency HZ           Simulation base tone, default 440\n"
         "  --amplitude 0..1         Simulation peak scale, default 0.25\n"
-        "  --segment-seconds N      WAV rotation interval, default 60\n"
+        "  --depth off|gradient|noise Simulated 512x424 uint16 depth at 30 Hz (default off)\n"
+        "  --segment-seconds N      Audio/depth rotation interval, default 60\n"
         "  --fast                   Unpaced simulation, requires finite duration\n";
 }
 int run(const std::vector<std::string>& args) {
@@ -58,6 +62,22 @@ int run(const std::vector<std::string>& args) {
         const std::vector<recorder::AudioDevice> devices = recorder::enumerate_audio_devices();
         if (devices.empty()) std::cout << "No active microphone endpoints. Simulation needs no audio hardware.\n";
         for (std::size_t i = 0; i < devices.size(); ++i) std::cout << devices[i].name << "\n  " << devices[i].id << '\n';
+        return 0;
+    }
+    if (args[1] == "export-depth") {
+        std::string input, output, audio, ffmpeg = "ffmpeg";
+        for (std::size_t i = 2; i < args.size(); ++i) {
+            const std::string key = args[i];
+            if (key == "--help") { usage(); return 0; }
+            if (++i == args.size()) throw std::invalid_argument("Missing value for " + key);
+            if (key == "--input") input = args[i];
+            else if (key == "--output") output = args[i];
+            else if (key == "--audio") audio = args[i];
+            else if (key == "--ffmpeg") ffmpeg = args[i];
+            else throw std::invalid_argument("Unknown export option: " + key);
+        }
+        recorder::export_depth_video(input, output, audio, ffmpeg);
+        std::cout << "Lossless depth video written to " << output << '\n';
         return 0;
     }
     if (args[1] != "record") throw std::invalid_argument("Unknown command: " + args[1]);
@@ -74,6 +94,7 @@ int run(const std::vector<std::string>& args) {
         else if (key == "--duration") o.duration_seconds = number(v);
         else if (key == "--device") o.device_id = v;
         else if (key == "--segment-seconds") o.segment_seconds = integer(v);
+        else if (key == "--depth") o.depth_pattern = v;
         else if (key == "--sample-rate") { o.sample_rate = integer(v); simulation_options = true; }
         else if (key == "--channels") { o.channels = integer(v); simulation_options = true; }
         else if (key == "--signal") { o.signal = v; simulation_options = true; }
@@ -102,6 +123,7 @@ int run(const std::vector<std::string>& args) {
     std::cout << s.state << ": " << s.frames << " sample frames, " << s.format.channels << " channel(s), "
               << s.format.sample_rate << " Hz, " << std::fixed << std::setprecision(3)
               << static_cast<double>(s.frames) / s.format.sample_rate << " seconds\n";
+    if (o.depth_pattern != "off") std::cout << s.depth_frames << " depth frames (512x424, 30 Hz, uint16 millimetres)\n";
     if (!s.error.empty()) { std::cerr << s.error << '\n'; return 1; }
     return 0;
 }

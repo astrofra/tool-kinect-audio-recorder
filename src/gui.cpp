@@ -53,6 +53,37 @@ void draw_timecode(const recorder::RecorderStatus& status, ImFont* font, float s
     ImGui::EndChild();
     ImGui::PopStyleVar(); ImGui::PopStyleColor();
 }
+void draw_depth_preview(const recorder::RecorderStatus& status, GLuint texture,
+        std::shared_ptr<const recorder::DepthFrame>& displayed) {
+    ImGui::TextUnformatted("DEPTH PREVIEW");
+    ImGui::TextDisabled("512 x 424 / 30 Hz / millimetres");
+    if (!status.depth_preview) {
+        displayed.reset();
+        ImGui::TextWrapped("Select a simulated depth source and press Record to see the animated depth map.");
+        return;
+    }
+    if (displayed != status.depth_preview) {
+        const std::vector<std::uint16_t>& pixels = status.depth_preview->millimetres;
+        std::vector<unsigned char> rgb(pixels.size() * 3);
+        for (std::size_t i = 0; i < pixels.size(); ++i) {
+            // Visualization only. The archive always retains the original uint16 values.
+            const float t = std::max(0.0f, std::min(1.0f, (pixels[i] - 500.0f) / 5500.0f));
+            rgb[i * 3] = pixels[i] ? static_cast<unsigned char>(255 * t) : 0;
+            rgb[i * 3 + 1] = pixels[i] ? static_cast<unsigned char>(255 * (1 - std::abs(2 * t - 1))) : 0;
+            rgb[i * 3 + 2] = pixels[i] ? static_cast<unsigned char>(255 * (1 - t)) : 0;
+        }
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, recorder::DepthWidth, recorder::DepthHeight, 0,
+            GL_RGB, GL_UNSIGNED_BYTE, rgb.data());
+        displayed = status.depth_preview;
+    }
+    const float width = std::max(1.0f, ImGui::GetContentRegionAvail().x);
+    ImGui::Image(static_cast<ImTextureID>(texture), ImVec2(width, width * recorder::DepthHeight / recorder::DepthWidth));
+    ImGui::Text("%llu depth frames stored", static_cast<unsigned long long>(status.depth_frames));
+    ImGui::TextDisabled("Blue: near / Red: far / Black: invalid");
+    ImGui::TextWrapped("The square flashes once per audio-clock second. The raw depth map keeps 16-bit precision.");
+}
 void screenshot(GLFWwindow* window, const std::string& path) {
     int w, h; glfwGetFramebufferSize(window, &w, &h);
     std::vector<unsigned char> rgb(static_cast<std::size_t>(w) * h * 3);
@@ -75,7 +106,7 @@ int run(int argc, char** argv) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     if (smoke) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(920, 820, "Kinect Audio Recorder", 0, 0);
+    GLFWwindow* window = glfwCreateWindow(1320, 850, "Kinect Audio Recorder", 0, 0);
     if (!window) { glfwTerminate(); throw std::runtime_error("Cannot create OpenGL 3.3 window"); }
     glfwMakeContextCurrent(window); glfwSwapInterval(smoke ? 0 : 1);
     IMGUI_CHECKVERSION(); ImGui::CreateContext();
@@ -93,11 +124,16 @@ int run(int argc, char** argv) {
     ImFont* timecode_font = io.Fonts->AddFontDefaultVector(); // Embedded scalable font; no external asset.
     if (!ImGui_ImplGlfw_InitForOpenGL(window, true) || !ImGui_ImplOpenGL3_Init("#version 330"))
         throw std::runtime_error("Cannot initialize ImGui backends");
+    GLuint depth_texture = 0; glGenTextures(1, &depth_texture); glBindTexture(GL_TEXTURE_2D, depth_texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    std::shared_ptr<const recorder::DepthFrame> displayed_depth;
 
     recorder::Recorder recorder;
     recorder::RecordOptions options;
     char output[2048]; set_text(output, sizeof(output), smoke ? smoke_output : recorder::default_take_path());
     int source_choice = 0, device_choice = 0, signal_choice = 0, channels = 1;
+    int depth_choice = 1;
     int sample_rate = 48000;
     float frequency = 440, amplitude = 0.25f;
     double duration = 0;
@@ -123,10 +159,16 @@ int run(int argc, char** argv) {
         ImGui::Begin("Recorder", 0, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
             ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         ImGui::TextUnformatted("KINECT AUDIO RECORDER");
-        ImGui::TextDisabled("Record a microphone or generate a test signal without audio hardware");
+        ImGui::TextDisabled("Audio capture and simulated Kinect depth - no sensor needed for simulation");
         draw_timecode(status, timecode_font, scale_x);
         // Keep the counter visible when controls or session history need scrolling.
         ImGui::BeginChild("Recorder controls", ImVec2(0, 0));
+        const bool columns = ImGui::BeginTable("Capture columns", 2, ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp);
+        if (columns) {
+            ImGui::TableSetupColumn("Controls", ImGuiTableColumnFlags_WidthStretch, 1.6f);
+            ImGui::TableSetupColumn("Depth", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+            ImGui::TableNextRow(); ImGui::TableSetColumnIndex(0);
+        }
         ImGui::Separator();
         ImGui::BeginDisabled(status.active);
         ImGui::SetNextItemWidth(240);
@@ -137,7 +179,7 @@ int run(int argc, char** argv) {
             ImGui::SameLine(); ImGui::SetNextItemWidth(130); ImGui::SliderInt("Channels", &channels, 1, 2);
             ImGui::SetNextItemWidth(260); ImGui::SliderFloat("Tone (Hz)", &frequency, 20, 2000, "%.0f");
             ImGui::SameLine(); ImGui::SetNextItemWidth(200); ImGui::SliderFloat("Amplitude", &amplitude, 0, 1, "%.2f");
-            ImGui::TextDisabled("No input or output audio device is needed. Stereo uses different tones per channel.");
+            ImGui::TextWrapped("No audio device needed. Stereo uses different tones per channel.");
         } else {
             if (ImGui::Button("Refresh inputs")) {
                 try { devices = recorder::enumerate_audio_devices(); device_choice = 0; ui_error.clear(); }
@@ -153,6 +195,8 @@ int run(int argc, char** argv) {
             }
             ImGui::TextDisabled("Uses the device's native shared format (mono/stereo); no automatic source switching.");
         }
+        ImGui::SetNextItemWidth(240);
+        ImGui::Combo("Depth source", &depth_choice, "Off (audio only)\0Simulated gradient\0Simulated noise\0");
         ImGui::SetNextItemWidth(-120); ImGui::InputText("Take folder", output, sizeof(output));
         if (ImGui::Button("New take path")) set_text(output, sizeof(output), recorder::default_take_path());
         ImGui::SameLine(); ImGui::SetNextItemWidth(130); ImGui::InputDouble("Seconds (0 = until Stop)", &duration, 0, 0, "%.2f");
@@ -169,6 +213,7 @@ int run(int argc, char** argv) {
             options.output = output; options.source = source_choice == 0 ? "simulate" : "wasapi";
             options.device_id = device_choice > 0 ? devices[device_choice - 1].id : "";
             options.signal = signal_choice == 0 ? "markers" : "sine";
+            options.depth_pattern = depth_choice == 0 ? "off" : depth_choice == 1 ? "gradient" : "noise";
             options.sample_rate = static_cast<unsigned>(sample_rate); options.channels = static_cast<unsigned>(channels);
             options.frequency = frequency; options.amplitude = amplitude; options.duration_seconds = smoke ? 0.25 : duration;
             if (source_choice != 0) {
@@ -195,6 +240,11 @@ int run(int argc, char** argv) {
             if (ImGui::SmallButton("Copy path")) ImGui::SetClipboardText(takes[i].c_str());
             ImGui::SameLine(); ImGui::TextUnformatted(takes[i].c_str()); ImGui::PopID();
         }
+        if (columns) {
+            ImGui::TableSetColumnIndex(1);
+            draw_depth_preview(status, depth_texture, displayed_depth);
+            ImGui::EndTable();
+        }
         ImGui::EndChild(); ImGui::End(); ImGui::Render();
         int w, h; glfwGetFramebufferSize(window, &w, &h);
         glViewport(0, 0, w, h); glClearColor(0.065f, 0.08f, 0.105f, 1); glClear(GL_COLOR_BUFFER_BIT);
@@ -208,6 +258,7 @@ int run(int argc, char** argv) {
         if (smoke && std::chrono::steady_clock::now() - began > std::chrono::seconds(10)) { exit_code = 1; break; }
     }
     recorder.request_stop(); recorder.wait();
+    glDeleteTextures(1, &depth_texture);
     ImGui_ImplOpenGL3_Shutdown(); ImGui_ImplGlfw_Shutdown(); ImGui::DestroyContext();
     glfwDestroyWindow(window); glfwTerminate();
     return exit_code;

@@ -63,7 +63,7 @@ try {
         # Exercise the packaged programs before touching the existing release.
         Invoke-Checked (Join-Path $stageDir 'recording_tool.exe') @(
             'record', '--source', 'simulate', '--output', 'build/release/cli-smoke',
-            '--duration', '0.25', '--channels', '2', '--fast')
+            '--duration', '0.25', '--channels', '2', '--depth', 'gradient', '--fast')
         Invoke-Checked (Join-Path $stageDir 'audio_recorder.exe') @(
             '--smoke-test', 'build/release/gui-smoke')
 

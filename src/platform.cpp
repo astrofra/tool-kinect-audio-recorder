@@ -140,6 +140,19 @@ std::FILE* open_file(const std::string& path, const char* mode) {
     if (!f) throw std::runtime_error("Cannot open '" + path + "': " + system_error());
     return f;
 }
+bool path_exists(const std::string& path) {
+#ifdef _WIN32
+    if (GetFileAttributesW(from_utf8(path).c_str()) != INVALID_FILE_ATTRIBUTES) return true;
+    const DWORD error = GetLastError();
+    if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) return false;
+    throw std::runtime_error("Cannot inspect output path (Windows error " + std::to_string(error) + ")");
+#else
+    struct stat info;
+    if (lstat(path.c_str(), &info) == 0) return true;
+    if (errno == ENOENT) return false;
+    throw std::runtime_error("Cannot inspect output path: " + system_error());
+#endif
+}
 void sync_file(std::FILE* file) {
     if (std::fflush(file)) throw std::runtime_error("File flush failed");
 #ifdef _WIN32
