@@ -28,6 +28,8 @@ ctest --preset windows
 
 The GUI defaults to simulation. Choose a new take folder, press **Record**, then **Stop**. The meters display the recorded signal; no microphone, speakers, or headset are required for simulation. Recorded WAVs can be opened in an audio player/editor. This first UI lists takes created during the current application session.
 
+A large elapsed timecode stays visible at the top: `HH:MM:SS:FF`, at **30 fps non-drop**. It follows the stored audio sample count, keeps the final value after Stop, and resets for each new recording.
+
 ## Command line
 
 ```powershell

@@ -16,6 +16,43 @@ namespace {
 void set_text(char* buffer, std::size_t size, const std::string& text) {
     std::snprintf(buffer, size, "%s", text.c_str());
 }
+std::string elapsed_timecode(std::uint64_t sample_frames, unsigned sample_rate) {
+    if (!sample_rate) return "--:--:--:--";
+    // 30 fps non-drop, based on stored audio rather than UI/wall-clock time.
+    // Divide first to avoid overflow and round down at frame boundaries.
+    const std::uint64_t seconds = sample_frames / sample_rate;
+    const unsigned frame = static_cast<unsigned>((sample_frames % sample_rate) * 30 / sample_rate);
+    char text[64];
+    std::snprintf(text, sizeof(text), "%02llu:%02u:%02u:%02u",
+        static_cast<unsigned long long>(seconds / 3600),
+        static_cast<unsigned>((seconds / 60) % 60), static_cast<unsigned>(seconds % 60), frame);
+    return text;
+}
+void draw_timecode(const recorder::RecorderStatus& status, ImFont* font, float scale) {
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.035f, 0.045f, 0.06f, 1));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16 * scale, 12 * scale));
+    if (ImGui::BeginChild("Timecode", ImVec2(0, 118 * scale), ImGuiChildFlags_Borders,
+            ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
+        ImGui::TextDisabled("ELAPSED TIMECODE  /  30 FPS NON-DROP");
+        const std::string text = elapsed_timecode(status.frames, status.format.sample_rate);
+        float font_size = 60;
+        ImGui::PushFont(font, font_size);
+        const float available = ImGui::GetContentRegionAvail().x;
+        const float width = ImGui::CalcTextSize(text.c_str()).x;
+        if (width > available && available > 0) {
+            font_size *= available / width;
+            ImGui::PopFont(); ImGui::PushFont(font, font_size);
+        }
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
+            std::max(0.0f, (available - ImGui::CalcTextSize(text.c_str()).x) * 0.5f));
+        const ImVec4 color = !status.error.empty() ? ImVec4(1, 0.65f, 0.35f, 1) :
+            status.active ? ImVec4(0.4f, 0.95f, 0.8f, 1) : ImVec4(0.9f, 0.94f, 1, 1);
+        ImGui::TextColored(color, "%s", text.c_str());
+        ImGui::PopFont();
+    }
+    ImGui::EndChild();
+    ImGui::PopStyleVar(); ImGui::PopStyleColor();
+}
 void screenshot(GLFWwindow* window, const std::string& path) {
     int w, h; glfwGetFramebufferSize(window, &w, &h);
     std::vector<unsigned char> rgb(static_cast<std::size_t>(w) * h * 3);
@@ -38,7 +75,7 @@ int run(int argc, char** argv) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     if (smoke) glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    GLFWwindow* window = glfwCreateWindow(920, 690, "Kinect Audio Recorder", 0, 0);
+    GLFWwindow* window = glfwCreateWindow(920, 820, "Kinect Audio Recorder", 0, 0);
     if (!window) { glfwTerminate(); throw std::runtime_error("Cannot create OpenGL 3.3 window"); }
     glfwMakeContextCurrent(window); glfwSwapInterval(smoke ? 0 : 1);
     IMGUI_CHECKVERSION(); ImGui::CreateContext();
@@ -52,6 +89,8 @@ int run(int argc, char** argv) {
     style.Colors[ImGuiCol_WindowBg] = ImVec4(0.065f, 0.08f, 0.105f, 1);
     float scale_x = 1, scale_y = 1; glfwGetWindowContentScale(window, &scale_x, &scale_y);
     style.ScaleAllSizes(scale_x); io.FontGlobalScale = scale_x;
+    io.Fonts->AddFontDefault();
+    ImFont* timecode_font = io.Fonts->AddFontDefaultVector(); // Embedded scalable font; no external asset.
     if (!ImGui_ImplGlfw_InitForOpenGL(window, true) || !ImGui_ImplOpenGL3_Init("#version 330"))
         throw std::runtime_error("Cannot initialize ImGui backends");
 
@@ -81,9 +120,13 @@ int run(int argc, char** argv) {
         ImGui_ImplOpenGL3_NewFrame(); ImGui_ImplGlfw_NewFrame(); ImGui::NewFrame();
         const ImGuiViewport* viewport = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(viewport->WorkPos); ImGui::SetNextWindowSize(viewport->WorkSize);
-        ImGui::Begin("Recorder", 0, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+        ImGui::Begin("Recorder", 0, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         ImGui::TextUnformatted("KINECT AUDIO RECORDER");
         ImGui::TextDisabled("Record a microphone or generate a test signal without audio hardware");
+        draw_timecode(status, timecode_font, scale_x);
+        // Keep the counter visible when controls or session history need scrolling.
+        ImGui::BeginChild("Recorder controls", ImVec2(0, 0));
         ImGui::Separator();
         ImGui::BeginDisabled(status.active);
         ImGui::SetNextItemWidth(240);
@@ -152,7 +195,7 @@ int run(int argc, char** argv) {
             if (ImGui::SmallButton("Copy path")) ImGui::SetClipboardText(takes[i].c_str());
             ImGui::SameLine(); ImGui::TextUnformatted(takes[i].c_str()); ImGui::PopID();
         }
-        ImGui::End(); ImGui::Render();
+        ImGui::EndChild(); ImGui::End(); ImGui::Render();
         int w, h; glfwGetFramebufferSize(window, &w, &h);
         glViewport(0, 0, w, h); glClearColor(0.065f, 0.08f, 0.105f, 1); glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());

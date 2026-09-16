@@ -15,6 +15,12 @@ There are no runtime dependencies for the CLI beyond the platform's C/C++ runtim
 
 The recorder accepts another `AudioSource` implementation through the same interface; tests use this to inject timestamp errors, sequence gaps, and source failures. This does not couple future Kinect capture to the audio device API.
 
+## Elapsed timecode display
+
+The GUI has a large, fixed header showing `HH:MM:SS:FF` at **30/1 fps, non-drop**, matching the default planned proxy rate. The display is derived from stored audio sample frames at the actual sample rate, rounded down to the current timecode frame using integer arithmetic. It does not advance when no audio is written, retains the final duration after Stop/finalization, and resets to zero when a new recording starts. It stays visible while the controls and take history scroll. Hours continue past 24 for long takes.
+
+This is an elapsed-duration display in SMPTE-style notation, not embedded source timecode or an external clock synchronization feature. It does not change recording timestamps or the archive format; interrupted takes still require inspection of their timing journals.
+
 ## Simulation
 
 Default: 48 kHz, mono, amplitude 0.25, 440 Hz base tone, plus an 80 ms 1 kHz marker each sample-clock second. Markers have 5 ms ramps. `--signal sine` produces only the base tone; the second stereo channel uses 1.5 times the base frequency. `--amplitude 0` generates silence. Simulation writes samples to the recorder and meters; it does not play sound through the speakers.

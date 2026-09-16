@@ -11,6 +11,10 @@ is selected by default: choose a new recording folder and press **Record**, then
 **Stop**. No audio hardware is needed for simulation. A graphics driver supporting
 OpenGL 3.3 is required for the interface.
 
+The large counter at the top displays elapsed recorded audio as `HH:MM:SS:FF`
+at 30 fps non-drop. It retains the final duration after Stop and resets for each
+new recording. It remains visible while scrolling the controls or take history.
+
 From PowerShell in this folder:
 
 ```powershell
