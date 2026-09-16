@@ -59,7 +59,8 @@ There is an immediate build issue to check: upstream libfreenect2 specifies CMak
 | Preview | OpenGL 3.3 core, plus a small GL loader | Render depth directly on the GPU and display it inside the ImGui interface. |
 | Recording compression | Zstandard | One reusable codec for native depth storage and a browser WASM decoder. |
 | Metadata | One small, pinned JSON implementation | Avoid hand-written general-purpose JSON parsing. |
-| Export audio encoding | Optional, pinned FFmpeg executable | Keeps codec conversion outside the live recording path. |
+| Edit-list parsing | One small, pinned native XML parser | Implement the qualified XML subset in C++; no Python runtime required. |
+| Proxy/video and audio encoding | Pinned FFmpeg executable for export commands | Encodes timecoded video proxies and delivery audio outside the live recording path. |
 | Web player | JavaScript, WebGL 2, a worker, Zstandard decoder WASM | No application server or large front-end framework required. |
 
 The upstream build also exposes switches for examples, OpenNI2, CUDA, OpenCL, and OpenGL. Disable unused targets explicitly. Its OpenGL processing backend also uses GLFW; build against a consistent GLFW version and coordinate its lifecycle with the application. These are build observations, not a claim that a chosen configuration has compiled successfully. [Upstream CMake configuration](https://github.com/OpenKinect/libfreenect2/blob/fd64c5d9b214df6f6a55b4419357e51083f15d93/CMakeLists.txt).
@@ -116,6 +117,7 @@ This does not establish hardware genlock or sample-accurate exposure alignment. 
 | Subject mask includes the room or removes moving limbs | Qualify a fixed set, keep full depth masters, and allow crop/background adjustments during export. |
 | Disk stalls, full disk, or process crash | Append recoverable records, rotate files, checkpoint, and test fault recovery. |
 | Browser throughput or bandwidth is insufficient | Export multiple profiles, use bounded buffering, and retain a rendered 2D video fallback. |
+| XML dialect or editorial operation is unsupported | Qualify one editor/export profile first, freeze proxy mappings, and reject unrepresentable edits with explicit diagnostics. |
 | Source ecosystem becomes unavailable | Pin and archive source, dependencies, calibration, format documentation, and known-good binary builds. |
 
 Suggested sequence, assuming one experienced native developer and existing working hardware:
@@ -125,7 +127,16 @@ Suggested sequence, assuming one experienced native developer and existing worki
 | A: hardware and timing spike | Minimal C++ capture; USB/backend comparison; simultaneous audio; early browser depth sample; measured timestamp behavior. | 3–5 working days, excluding driver investigation. |
 | B: recorder and archive | Two-hour recording, recovery, timing diagnostics, desktop replay, calibrated drift correction. | 1–2 weeks. |
 | C: usable desktop tool | Dear ImGui controls, meters, point-cloud preview, library metadata, packaging on a clean PC. | 1–2 weeks. |
-| D: web publication | Exporter, static-hosted player, seeking/buffering tests, browser timing verification. | 1–2 weeks. |
-| E: hardening | Fault injection, setup documentation, longer trials, visual and listening review. | 1–2 weeks. |
+| D: external editing | Timecoded proxies, XML parser, materialized conform, and an end-to-end round trip through DaVinci Resolve. | 1–2 weeks for the specified cuts-only subset. |
+| E: web publication | Exporter, static-hosted player, seeking/buffering tests, browser timing verification. | 1–2 weeks. |
+| F: hardening | Fault injection, setup documentation, longer trials, visual and listening review. | 1–2 weeks. |
 
 These are planning estimates, not commitments; driver failures or a new compression scheme can dominate the schedule. Proceed to a production implementation only when Stage A demonstrates stable concurrent capture and a credible path to the synchronization targets.
+
+## 7. Feasibility of conventional video editing
+
+The [proxy/XML workflow](editing-workflow.md) is feasible without changing capture hardware or language. Offline rendering removes the real-time encoding requirement, and conform can copy selected depth payloads and PCM according to an explicit edit plan. The main additional work is preserving source identity, translating XML timing correctly, and maintaining sample/frame correspondence through cuts.
+
+DaVinci Resolve is the selected editing application. Use its Final Cut Pro 7 XML export as the first interchange target. Blackmagic documents FCP7/XML interchange in its manuals and Resolve 20 training material; this is distinct from modern FCPXML. The installed version and its actual XML output must be qualified with fixtures, rather than assuming any `.xml` file is compatible. See Blackmagic's [Resolve 20 Colorist Guide](https://documents.blackmagicdesign.com/UserManuals/DaVinci-Resolve-20-Colorist-Guide.pdf) and Apple's [xmeml version history](https://developer.apple.com/library/archive/documentation/AppleApplications/Reference/FinalCutPro_XML/VersionsoftheInterchangeFormat/VersionsoftheInterchangeFormat.html).
+
+The proposed baseline deliberately materializes a new depth/audio recording at the proxy's edit cadence. It preserves source spatial precision, while explicitly recording depth-frame repeats/skips introduced when mapping native timestamps to video frames. This makes the edited output reproduce the montage that was approved in the video editor. The proxy's fixed view does not constrain later rendering of the retained 3D data.

@@ -1,12 +1,12 @@
 # Synchronization and recording format
 
-Version: **0.1 proposal**. Date: **16 September 2026**.
+Version: **0.2 proposal**. Date: **16 September 2026**.
 
 This is a proposed timing and storage contract, not a claim that the hardware already meets the accuracy targets. The first implementation milestone must verify timestamp behavior on the actual devices.
 
 ## 1. Direct answers
 
-**Do we need timecode?** We need timestamps on a shared timeline. SMPTE/LTC timecode is unnecessary for one PC, one Kinect, and one audio input. Timecode labels do not by themselves lock device clocks or remove transport latency. This design does not assume a supported common hardware clock or trigger connection between the Kinect v2 and the sound card.
+**Do we need timecode?** Acquisition needs timestamps on a shared timeline; SMPTE/LTC is unnecessary for synchronizing one PC, one Kinect, and one audio input. Video proxies additionally carry editorial timecode for identification and editing, as specified in the [editing workflow](editing-workflow.md). Timecode labels do not by themselves lock device clocks or remove transport latency. This design does not assume a supported common hardware clock or trigger connection between the Kinect v2 and the sound card.
 
 **Do we need synchronization packets inside a single stream?** Every depth frame needs a timestamp, and every audio block needs a sample position and a mapping to the common timeline. Those records may live in separate files within one versioned session folder. A single interleaved container is optional; multiplexing alone does not synchronize independent clocks.
 
@@ -195,3 +195,15 @@ The media timeline does not promise sample-accurate correspondence to the speake
 If it fails, move to an explicitly scheduled Web Audio playback path, mapping media samples to the audio context clock. `AudioContext.getOutputTimestamp()` can relate that context to output/performance time, but only after establishing the media-to-context mapping; it cannot simply replace an HTML audio element's time with an unrelated clock. Streaming decode, seeking, sample accounting, and output-latency handling would then become additional implementation work. [Web Audio timing API](https://www.w3.org/TR/webaudio/#dom-audiocontext-getoutputtimestamp).
 
 Browser robustness comes from bounded buffering, independent timestamps, explicit state transitions, and audio-led frame selection. Browser scheduling jitter must cause a temporary rendering miss, not a progressively diverging interview.
+
+## 9. Edited recording semantics
+
+A proxy freezes a particular source timing solution. Its frame map relates constant-rate video frame indices to original depth records and the audio-led source media timeline. XML source and destination intervals are converted through this map, never directly from displayed timecode to raw Kinect ticks. See [video proxy editing and XML conform](editing-workflow.md) for boundary conventions and examples.
+
+A conformed recording has `kind = conformed`, a new recording ID, an explicit edit rate, and a timeline beginning at zero. Each output depth record has a new record ID and presentation timestamp plus provenance identifying the master, source record, native timestamps, and frozen timing solution. Source counters may jump backward between cuts or repeat; readers must not interpret them as a new continuous capture clock. The playback and web-export timeline is the already-resolved editorial timeline, so no clock refitting is applied to it.
+
+Conformed frames use editorial display intervals `[frame / rate, (frame + 1) / rate)`, including exact cut boundaries. This overrides the closest-frame midpoint selection used for original captures. Carry the interval policy through the web export and subsequent proxy renders; neither player may advance a cut by selecting an upcoming frame early.
+
+Add an edit manifest describing the imported XML hash, selected sequence, normalized source/destination intervals, relink decisions, and cut boundaries. The initial materialization profile uses compatible depth formats/calibration and one audio layout, copies full-resolution depth samples, and produces continuous PCM on the destination timeline. Repeated depth payloads are explicitly derived frames; gap intervals contain empty geometry and silence. Reset temporal filters at every cut so adjacent shots cannot blend across an editorial boundary.
+
+The output contains its own payloads, calibration, indexes, and metadata. Provenance links remain informative when source folders are unavailable. Record the derivation type and rational frame timing in the next format revision; round each absolute presentation time to stored microseconds independently rather than repeatedly adding a rounded frame duration.
