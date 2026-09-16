@@ -6,6 +6,19 @@ A Windows interview recorder, starting with audio capture and hardware-free audi
 
 Requirements: Visual Studio 2022 with the C++ desktop workload/Windows SDK, CMake 3.21+ for presets, and Git. The GUI build fetches pinned Dear ImGui and GLFW revisions on its first configuration.
 
+For a complete clean build and a ready-to-commit Windows x64 package:
+
+```powershell
+.\build_release.bat
+.\release\audio_recorder.exe
+```
+
+The batch file works from any working directory. It invokes the checked-in PowerShell helper, deletes only `build/release/`, fetches the pinned GUI sources again, compiles both executables in Release mode with a static C/C++ runtime, runs CTest and CLI/hidden-window GUI simulation checks, and copies the package into `release/`. Internet access and an OpenGL 3.3-capable graphics driver are required for this complete build. Python 3 is optional; CMake enables the additional WAV/JSON validation suite when it finds an interpreter.
+
+`release/` contains the two executables, a usage guide, license notices, and SHA-256 checksums. It is tracked normally by Git; the script does not stage files, commit, or push. Existing release files are only updated after compilation and all enabled tests succeed. Other files in `release/`, including recordings, are preserved; `release/recordings/` is ignored. Close running release executables before rebuilding so Windows permits replacement. Edit `packaging/README.md` to change the generated usage guide. Intermediate builds, downloaded dependencies, and test recordings stay under ignored `build/`.
+
+For incremental development builds:
+
 ```powershell
 cmake --preset windows
 cmake --build --preset windows --parallel

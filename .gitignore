@@ -2,6 +2,7 @@
 /commit_with_llm.bat
 /build/
 /recordings/
+/release/recordings/
 /test-stop-*/
 /test-fault-*/
 __pycache__/

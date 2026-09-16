@@ -10,6 +10,18 @@
       "cacheVariables": { "RECORDER_BUILD_GUI": "ON", "BUILD_TESTING": "ON" }
     },
     {
+      "name": "windows-release",
+      "displayName": "Windows x64 distributable, static C/C++ runtime",
+      "inherits": "windows",
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>",
+        "USE_MSVC_RUNTIME_LIBRARY_DLL": "OFF",
+        "BUILD_SHARED_LIBS": "OFF",
+        "CMAKE_INSTALL_BINDIR": "."
+      }
+    },
+    {
       "name": "portable",
       "displayName": "Portable CLI and simulation",
       "generator": "Ninja",
@@ -19,10 +31,12 @@
   ],
   "buildPresets": [
     { "name": "windows", "configurePreset": "windows", "configuration": "Release" },
+    { "name": "windows-release", "configurePreset": "windows-release", "configuration": "Release" },
     { "name": "portable", "configurePreset": "portable" }
   ],
   "testPresets": [
     { "name": "windows", "configurePreset": "windows", "configuration": "Release", "output": { "outputOnFailure": true } },
+    { "name": "windows-release", "configurePreset": "windows-release", "configuration": "Release", "output": { "outputOnFailure": true } },
     { "name": "portable", "configurePreset": "portable", "output": { "outputOnFailure": true } }
   ]
 }

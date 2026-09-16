@@ -11,6 +11,8 @@ This document describes implemented behavior. The [product specification](specif
 
 There are no runtime dependencies for the CLI beyond the platform's C/C++ runtime. The optional GUI statically compiles pinned Dear ImGui v1.92.9b and GLFW 3.5.1 sources. The GUI needs an OpenGL 3.3 driver; simulation through the CLI does not need graphics or audio hardware. The application does not install or replace drivers.
 
+`build_release.bat` builds a clean Windows x64 package with the MSVC runtime statically linked into both executables. It runs the available CTest suites and simulation checks against the installed CLI and GUI before updating `release/`. The package includes license notices and checksums, is intended for Git, and needs no separately installed C/C++ runtime. Incremental builds remain available through the `windows` preset. See the repository [build instructions](../README.md).
+
 The recorder accepts another `AudioSource` implementation through the same interface; tests use this to inject timestamp errors, sequence gaps, and source failures. This does not couple future Kinect capture to the audio device API.
 
 ## Simulation
