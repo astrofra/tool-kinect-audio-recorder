@@ -41,7 +41,8 @@ void usage() {
         "  recording_tool record [options]\n\n"
         "  recording_tool export-depth --input SEGMENT.kd16 --output VIDEO.mkv\n"
         "      [--audio MATCHING_SEGMENT.wav] [--ffmpeg PATH]\n"
-        "      Lossless FFV1/gray16le; FFmpeg is required only for export.\n\n"
+        "      Lossless FFV1/gray16le. Uses bundled FFmpeg, then PATH.\n"
+        "      --ffmpeg overrides automatic selection.\n\n"
         "  --source simulate|wasapi  Default: simulate\n"
         "  --output DIRECTORY       New take directory (never overwritten)\n"
         "  --duration SECONDS       Default: 10; 0 records until Ctrl+C\n"
@@ -65,7 +66,8 @@ int run(const std::vector<std::string>& args) {
         return 0;
     }
     if (args[1] == "export-depth") {
-        std::string input, output, audio, ffmpeg = "ffmpeg";
+        std::string input, output, audio, ffmpeg;
+        bool explicit_ffmpeg = false;
         for (std::size_t i = 2; i < args.size(); ++i) {
             const std::string key = args[i];
             if (key == "--help") { usage(); return 0; }
@@ -73,9 +75,10 @@ int run(const std::vector<std::string>& args) {
             if (key == "--input") input = args[i];
             else if (key == "--output") output = args[i];
             else if (key == "--audio") audio = args[i];
-            else if (key == "--ffmpeg") ffmpeg = args[i];
+            else if (key == "--ffmpeg") { ffmpeg = args[i]; explicit_ffmpeg = true; }
             else throw std::invalid_argument("Unknown export option: " + key);
         }
+        if (!explicit_ffmpeg) ffmpeg = recorder::default_ffmpeg_path();
         recorder::export_depth_video(input, output, audio, ffmpeg);
         std::cout << "Lossless depth video written to " << output << '\n';
         return 0;

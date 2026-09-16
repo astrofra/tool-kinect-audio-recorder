@@ -45,9 +45,11 @@ To record depth from the CLI and optionally export one segment as lossless video
 .\recording_tool.exe export-depth --input recordings\depth-test\depth\000000.kd16 --audio recordings\depth-test\audio\000000.wav --output recordings\depth-test\depth.mkv
 ```
 
-Export uses FFV1 `gray16le` and optional PCM audio in Matroska. It requires an
-external FFmpeg executable on PATH, or `--ffmpeg PATH`; FFmpeg is not bundled.
-Capture and preview do not require FFmpeg. Choose the WAV with the same segment
+Export uses FFV1 `gray16le` and optional PCM audio in Matroska. The included
+`extern/ffmpeg/ffmpeg.exe` is found relative to the recorder executable, including
+when this folder is moved or launched from another working directory. No PATH
+configuration is needed. `--ffmpeg PATH` selects an explicit alternative; PATH is
+used as a fallback only when the bundled binary is absent. Choose the WAV with the same segment
 number and take as the depth file. The command exports one finalized segment at a
 time, rejects existing output files and reports encoder errors. Original timing
 journals remain the authority for the complete take.
@@ -56,6 +58,7 @@ journals remain the authority for the complete take.
 
 - `audio_recorder.exe`: desktop interface.
 - `recording_tool.exe`: command-line recorder and device enumeration.
+- `extern/ffmpeg/`: minimal FFmpeg 9.0.1, its licenses, exact source archive and rebuild scripts.
 - `LICENSE`: project license (GPL v3).
 - `licenses/`: GLFW and Dear ImGui license notices.
 - `SHA256SUMS.txt`: SHA-256 hashes of the generated package files except itself.
@@ -64,6 +67,12 @@ The executables include the C/C++ runtime and GUI libraries statically. No Pytho
 CMake, Git, Kinect SDK, or separate Visual C++ runtime installation is needed to
 run them. They still use Windows system libraries and the installed graphics/audio
 drivers. Python is used only by optional tests during the build.
+
+Bundled FFmpeg supports FFV1/rawvideo/PCM exports and decoding. H.264/H.265,
+network access, GPU encoding, ffplay and ffprobe are not included in this build.
+See [FFmpeg's package notice](extern/ffmpeg/README.md) for the LGPL 2.1-or-later
+license, source provenance, build configuration and reproduction instructions.
+Keep the complete `extern/ffmpeg/` directory with the release when distributing it.
 
 Rebuilding refreshes generated files here after successful compilation and tests.
 Other files, including `recordings/`, are preserved. Recordings in this folder are

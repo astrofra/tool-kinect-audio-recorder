@@ -22,6 +22,8 @@ void sync_file(std::FILE* file);
 std::uint64_t file_position(std::FILE* file);
 void write_atomic(const std::string& path, const std::string& content);
 int run_process(const std::vector<std::string>& arguments);
+// Prefer a bundled encoder next to this executable; otherwise allow PATH lookup.
+std::string default_ffmpeg_path();
 #ifdef _WIN32
 std::wstring from_utf8(const std::string& value);
 std::string to_utf8(const std::wstring& value);

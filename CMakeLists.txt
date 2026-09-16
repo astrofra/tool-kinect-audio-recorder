@@ -68,6 +68,9 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration.py $<TARGET_FILE:recording_tool>)
         add_test(NAME recorder_depth COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/depth_integration.py $<TARGET_FILE:recording_tool>)
+        add_test(NAME recorder_ffmpeg_bundle COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/bundled_ffmpeg.py $<TARGET_FILE:recording_tool>)
+        set_tests_properties(recorder_ffmpeg_bundle PROPERTIES SKIP_RETURN_CODE 77)
     endif()
 endif()
 

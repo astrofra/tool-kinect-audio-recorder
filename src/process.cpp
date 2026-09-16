@@ -8,10 +8,52 @@
 #include <cstring>
 #include <spawn.h>
 #include <sys/wait.h>
+#include <unistd.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#include <cstdlib>
+#endif
 extern char** environ;
 #endif
 
 namespace recorder {
+std::string default_ffmpeg_path() {
+    std::string executable;
+#ifdef _WIN32
+    std::vector<wchar_t> buffer(32768);
+    const DWORD length = GetModuleFileNameW(0, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (!length || length >= buffer.size()) throw std::runtime_error("Cannot locate the recorder executable");
+    executable = to_utf8(std::wstring(buffer.data(), length));
+    const char* relative = "extern/ffmpeg/ffmpeg.exe";
+#elif defined(__APPLE__)
+    std::uint32_t size = 0;
+    _NSGetExecutablePath(0, &size);
+    std::vector<char> buffer(size);
+    if (_NSGetExecutablePath(buffer.data(), &size) == 0) {
+        char* resolved = realpath(buffer.data(), 0);
+        if (resolved) { executable = resolved; std::free(resolved); }
+    }
+    const char* relative = "extern/ffmpeg/ffmpeg";
+#else
+    std::vector<char> buffer(4096);
+    for (;;) {
+        const ssize_t length = readlink("/proc/self/exe", buffer.data(), buffer.size());
+        if (length < 0) break;
+        if (static_cast<std::size_t>(length) < buffer.size()) {
+            executable.assign(buffer.data(), static_cast<std::size_t>(length)); break;
+        }
+        if (buffer.size() >= 1024 * 1024) break;
+        buffer.resize(buffer.size() * 2);
+    }
+    const char* relative = "extern/ffmpeg/ffmpeg";
+#endif
+    const std::size_t separator = executable.find_last_of("/\\");
+    if (separator != std::string::npos) {
+        const std::string bundled = path_join(executable.substr(0, separator), relative);
+        if (path_exists(bundled)) return bundled;
+    }
+    return "ffmpeg";
+}
 int run_process(const std::vector<std::string>& arguments) {
     if (arguments.empty()) throw std::invalid_argument("Empty process command");
 #ifdef _WIN32

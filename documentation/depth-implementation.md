@@ -132,11 +132,20 @@ from the same take: equal duration alone cannot prove source identity. Omit
 `--audio` for depth-only video. Existing outputs are rejected. If FFmpeg fails,
 any partial output is incomplete and must not be used as a successful export.
 
-FFmpeg is an optional external executable, found on PATH or supplied with
-`--ffmpeg C:\path\ffmpeg.exe`. It is launched directly with an argument list,
-without a shell; paths with spaces, Unicode and shell metacharacters are supported.
-FFmpeg is not downloaded or included in `release/`; capture and preview work
-without it. Its errors are reported to the console.
+The Windows release bundles a minimal **FFmpeg 9.0.1** executable under
+`release/extern/ffmpeg/`. Export finds it relative to the recorder executable,
+independently of the working directory. `--ffmpeg C:\path\ffmpeg.exe` overrides
+automatic selection; PATH is a fallback only when no bundled binary exists.
+FFmpeg is launched directly with an argument list, without a shell; paths with
+spaces, Unicode and shell metacharacters are supported. Capture and preview still
+work independently of the encoder. Its errors are reported to the console.
+
+The bundle includes LGPL notices, the exact unmodified source archive, SHA-256
+pins, MSVC build scripts and generated configuration files. It is rebuilt from
+source by `build_release.bat`, without external codec libraries, GPL/nonfree
+components, network protocols, GPU encoding or assembly dependencies. See the
+[FFmpeg package description](../extern/ffmpeg/README.md). The recorder remains
+C++11; FFmpeg is an independently built C program.
 
 The export uses Matroska, FFV1 version 3, range coding, intra frames, slice CRCs,
 strict `gray16le`, and four CPU threads. Optional audio is PCM float32. Both streams
@@ -159,7 +168,8 @@ pixel-format conversion. A reversible packing scheme might be evaluated later,
 with byte-for-byte round-trip tests and actual GPU qualification. FFV1 is a
 straightforward portable baseline; GPU compression is not implemented.
 
-Short local measurements on Windows/MSVC x64 with FFmpeg 7.0.2 (Gyan essentials):
+Initial local measurements on Windows/MSVC x64 used the external FFmpeg 7.0.2
+(Gyan essentials), before the minimal 9.0.1 bundle was introduced:
 
 | Three-second input | Depth frames | Raw depth bytes | FFV1 + mono PCM bytes | Export wall time |
 | --- | ---: | ---: | ---: | ---: |
@@ -182,6 +192,11 @@ When FFmpeg is installed, tests encode and decode gradient/noise segments with
 stereo audio, compare every depth byte and PCM sample, and test all 65,536 uint16
 values independently of the simulator's range. Unicode paths, missing encoders
 and existing-output refusal are also checked. Python is optional for tests only.
+
+The package test also copies the recorder and encoder into a directory with spaces
+and Unicode characters, clears PATH, and exports from a different working
+directory. It verifies byte-exact depth recovery and explicit `--ffmpeg` precedence.
+The release build runs codec tests using its newly compiled bundled encoder.
 
 The hidden-window GUI smoke test now records both streams and captures the depth
 preview alongside the timecode. Local visual inspection confirmed the preview.

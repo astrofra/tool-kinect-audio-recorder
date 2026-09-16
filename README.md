@@ -4,7 +4,7 @@ A Windows interview recorder with audio capture and hardware-free audio/depth si
 
 ## Build on Windows
 
-Requirements: Visual Studio 2022 with the C++ desktop workload/Windows SDK, CMake 3.21+ for presets, and Git. The GUI build fetches pinned Dear ImGui and GLFW revisions on its first configuration.
+Requirements: Visual Studio 2022 with the C++ desktop workload/Windows SDK, CMake 3.21+ for presets, and Git for Windows. The full release build also uses Git Bash and Windows `curl.exe`/`tar.exe` (with xz/zstd support). The GUI build fetches pinned Dear ImGui and GLFW revisions on its first configuration.
 
 For a complete clean build and a ready-to-commit Windows x64 package:
 
@@ -13,9 +13,9 @@ For a complete clean build and a ready-to-commit Windows x64 package:
 .\release\audio_recorder.exe
 ```
 
-The batch file works from any working directory. It invokes the checked-in PowerShell helper, deletes only `build/release/`, fetches the pinned GUI sources again, compiles both executables in Release mode with a static C/C++ runtime, runs CTest and CLI/hidden-window GUI simulation checks, and copies the package into `release/`. Internet access and an OpenGL 3.3-capable graphics driver are required for this complete build. Python 3 is optional; CMake enables the additional WAV/JSON validation suite when it finds an interpreter.
+The batch file works from any working directory. It invokes the checked-in PowerShell helper, deletes only `build/release/`, fetches the pinned GUI sources again, and compiles both recorder executables and a minimal FFmpeg from scratch with static runtimes. It then runs CTest, CLI/hidden-window GUI simulation and bundled-video export checks before copying the package into `release/`. Internet access and an OpenGL 3.3-capable graphics driver are required for this complete build. FFmpeg and GNU Make source/tool downloads are pinned by SHA-256 and cached under `build/downloads/`; compiled objects are rebuilt. Python 3 is optional for the additional file, codec and package-relocation tests.
 
-`release/` contains the two executables, a usage guide, license notices, and SHA-256 checksums. It is tracked normally by Git; the script does not stage files, commit, or push. Existing release files are only updated after compilation and all enabled tests succeed. Other files in `release/`, including recordings, are preserved; `release/recordings/` is ignored. Close running release executables before rebuilding so Windows permits replacement. Edit `packaging/README.md` to change the generated usage guide. Intermediate builds, downloaded dependencies, and test recordings stay under ignored `build/`.
+`release/` contains the two recorder executables, a usage guide, license notices, SHA-256 checksums, and `extern/ffmpeg/` with the encoder, licenses, exact source archive and build recipe. It is tracked normally by Git; the script does not stage files, commit, or push. Existing release files are only updated after compilation and all enabled tests succeed. Other files in `release/`, including recordings, are preserved; `release/recordings/` is ignored. Close running release executables before rebuilding so Windows permits replacement. Edit `packaging/README.md` to change the generated usage guide. Intermediate builds, downloaded dependencies, and test recordings stay under ignored `build/`.
 
 For incremental development builds:
 
@@ -53,11 +53,11 @@ Use `--device "<endpoint ID>"` to select a specific microphone. WASAPI uses the 
 ```powershell
 .\release\recording_tool.exe record --output recordings\depth-test --duration 10 --depth gradient
 
-# Optional FFmpeg on PATH: export one depth segment with its matching audio.
+# Uses the bundled FFmpeg: export one depth segment with its matching audio.
 .\release\recording_tool.exe export-depth --input recordings\depth-test\depth\000000.kd16 --audio recordings\depth-test\audio\000000.wav --output recordings\depth-test\depth-video.mkv
 ```
 
-Use `--depth noise` for animated noise, or `--depth off` for audio only (the CLI default). Native recording uses raw 16-bit segments and timing journals; optional **FFV1/gray16le in Matroska** preserves depth values exactly. Encoding runs after capture on the CPU. FFmpeg is not bundled or required for recording; use `--ffmpeg PATH` if it is not on PATH. Export validates one finalized segment at a time and never overwrites an existing output. See [the depth implementation](documentation/depth-implementation.md) for timing, format, measurements and limitations.
+Use `--depth noise` for animated noise, or `--depth off` for audio only (the CLI default). Native recording uses raw 16-bit segments and timing journals; **FFV1/gray16le in Matroska** preserves depth values exactly. Encoding runs after capture on the CPU. Export prefers `extern/ffmpeg/ffmpeg.exe` relative to the recorder executable, then PATH; `--ffmpeg PATH` explicitly overrides both. The Windows release includes a minimal FFmpeg 9.0.1 for FFV1/rawvideo/PCM, with its LGPL notices and complete corresponding FFmpeg source. See [its build recipe and provenance](extern/ffmpeg/README.md). Export validates one finalized segment at a time and never overwrites an existing output. See [the depth implementation](documentation/depth-implementation.md) for timing, format, measurements and limitations.
 
 ## Portable build without GUI dependencies
 

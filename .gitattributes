@@ -1,2 +1,3 @@
 # Preserve the exact packaged bytes so SHA256SUMS survives Git checkouts.
 /release/** -text
+/extern/ffmpeg/*.sh text eol=lf

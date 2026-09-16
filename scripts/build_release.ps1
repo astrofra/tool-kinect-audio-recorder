@@ -56,9 +56,18 @@ try {
 
         Invoke-Checked $cmake @('--preset', 'windows-release')
         Invoke-Checked $cmake @('--build', '--preset', 'windows-release', '--parallel')
-        Invoke-Checked $ctest @('--preset', 'windows-release', '--no-tests=error')
         Invoke-Checked $cmake @('--install', $buildDir, '--config', 'Release', '--prefix', $stageDir)
         Copy-Item -LiteralPath (Join-Path $repoRoot 'packaging\README.md') -Destination $stageDir
+
+        $ffmpegWork = Join-Path $buildDir 'ffmpeg'
+        $ffmpegPackage = Join-Path $stageDir 'extern\ffmpeg'
+        $downloads = Join-Path $repoRoot 'build\downloads'
+        Assert-WorkspacePath $ffmpegWork
+        Assert-WorkspacePath $ffmpegPackage
+        Assert-WorkspacePath $downloads
+        & (Join-Path $repoRoot 'extern\ffmpeg\build.ps1') -WorkDirectory $ffmpegWork -Destination $ffmpegPackage -CacheDirectory $downloads
+        $env:RECORDER_TEST_FFMPEG = Join-Path $ffmpegPackage 'ffmpeg.exe'
+        Invoke-Checked $ctest @('--preset', 'windows-release', '--no-tests=error')
 
         # Exercise the packaged programs before touching the existing release.
         Invoke-Checked (Join-Path $stageDir 'recording_tool.exe') @(
@@ -66,6 +75,9 @@ try {
             '--duration', '0.25', '--channels', '2', '--depth', 'gradient', '--fast')
         Invoke-Checked (Join-Path $stageDir 'audio_recorder.exe') @(
             '--smoke-test', 'build/release/gui-smoke')
+        Invoke-Checked (Join-Path $stageDir 'recording_tool.exe') @(
+            'export-depth', '--input', 'build/release/cli-smoke/depth/000000.kd16',
+            '--audio', 'build/release/cli-smoke/audio/000000.wav', '--output', 'build/release/cli-smoke.mkv')
 
         $packageFiles = @(Get-ChildItem -LiteralPath $stageDir -File -Recurse | Sort-Object FullName)
         $checksums = foreach ($file in $packageFiles) {

@@ -1,0 +1,13 @@
+{
+  "version": "9.0.1",
+  "source": {
+    "file": "ffmpeg-9.0.1.tar.xz",
+    "url": "https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz",
+    "sha256": "cf38e0e28c7e5605942c4a77755349b0145804a397af37eb1fb4c77cb237f635"
+  },
+  "make": {
+    "file": "make-4.4.1-2-x86_64.pkg.tar.zst",
+    "url": "https://repo.msys2.org/msys/x86_64/make-4.4.1-2-x86_64.pkg.tar.zst",
+    "sha256": "2408af61717dae87b00c855b132769a125c708907fc94a46bb16dae076113e5c"
+  }
+}

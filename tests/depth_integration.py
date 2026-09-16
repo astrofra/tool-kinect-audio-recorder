@@ -1,6 +1,7 @@
 """Independent archive, synchronization and optional FFV1 round-trip checks."""
 import json
 import math
+import os
 import pathlib
 import shutil
 import struct
@@ -9,7 +10,7 @@ import sys
 import tempfile
 
 exe = str(pathlib.Path(sys.argv[1]).resolve())
-ffmpeg = shutil.which("ffmpeg")
+ffmpeg = os.environ.get("RECORDER_TEST_FFMPEG") or shutil.which("ffmpeg")
 frame_bytes = 512 * 424 * 2
 
 
@@ -64,7 +65,7 @@ with tempfile.TemporaryDirectory(prefix="kinect-depth-tests-") as temp:
                 assert decode(encoded, "video") == data[64:], "Every depth byte must survive FFV1"
                 assert decode(encoded, "audio") == wav.read_bytes()[58:], "PCM samples must survive muxing"
                 before = encoded.read_bytes()
-                run("export-depth", "--input", take / entry["path"], "--output", encoded, ok=False)
+                run("export-depth", "--input", take / entry["path"], "--output", encoded, "--ffmpeg", ffmpeg, ok=False)
                 assert encoded.read_bytes() == before, "Existing exports must not be overwritten"
             cursor += count
         assert cursor == expected
@@ -111,7 +112,7 @@ with tempfile.TemporaryDirectory(prefix="kinect-depth-tests-") as temp:
         payload = b"".join(struct.pack("<H", i % 65536) for i in range(512 * 424))
         fixture.write_bytes(header + payload)
         output = root / "full-range.mkv"
-        run("export-depth", "--input", fixture, "--output", output)
+        run("export-depth", "--input", fixture, "--output", output, "--ffmpeg", ffmpeg)
         assert decode(output, "video") == payload
         print("FFV1 + PCM round trips are byte-exact, including full uint16 range and Unicode paths.")
     else:
