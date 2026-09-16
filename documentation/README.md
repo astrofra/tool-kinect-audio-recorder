@@ -2,6 +2,8 @@
 
 Research date: **16 September 2026**. Status: **proposed specification, before hardware validation**.
 
+Implementation has started with a C++11 audio recorder. See [the implemented audio milestone](audio-implementation.md) for current capabilities and the [root README](../README.md) for build/run instructions. The design documents below describe the complete target, not a claim that every feature is implemented.
+
 The application records a Kinect v2 depth stream and an external microphone on a Windows PC, then presents the interview as an animated, ghostlike point cloud with synchronized sound. Capture is native; the final publication target is an ordinary web browser. A command-line workflow renders timecoded video proxies for conventional editing and rebuilds a Kinect/audio recording from the exported XML edit list.
 
 ## Documents
@@ -16,7 +18,7 @@ The application records a Kinect v2 depth stream and an external microphone on a
 | Question | Recommendation |
 | --- | --- |
 | Which open-source Kinect v2 SDK? | Start with **libfreenect2**, pinned to an audited revision. Windows driver compatibility is the first feasibility gate. |
-| Which language? | **C++20 and CMake** for capture, desktop playback, and export. Neither Python nor C# is required. |
+| Which language? | **C++11 and CMake** for capture, desktop playback, and export. Neither Python nor C# is required at runtime. |
 | How should synchronization work? | Record device timestamps, audio sample positions, and their relationship to a shared Windows monotonic clock. Estimate drift, calibrate offset, and export explicit presentation timestamps. |
 | Which desktop UI? | **Dear ImGui + GLFW + OpenGL**. Keep capture independent of the GUI. |
 | How should the web version work? | Publish timestamped depth chunks and compressed audio; render with **WebGL 2**, following the audio playback timeline. |

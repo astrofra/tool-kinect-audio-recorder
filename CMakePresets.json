@@ -1,0 +1,28 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "windows",
+      "displayName": "Windows x64, Visual Studio 2022",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/windows",
+      "cacheVariables": { "RECORDER_BUILD_GUI": "ON", "BUILD_TESTING": "ON" }
+    },
+    {
+      "name": "portable",
+      "displayName": "Portable CLI and simulation",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/portable",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "RECORDER_BUILD_GUI": "OFF" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "windows", "configurePreset": "windows", "configuration": "Release" },
+    { "name": "portable", "configurePreset": "portable" }
+  ],
+  "testPresets": [
+    { "name": "windows", "configurePreset": "windows", "configuration": "Release", "output": { "outputOnFailure": true } },
+    { "name": "portable", "configurePreset": "portable", "output": { "outputOnFailure": true } }
+  ]
+}

@@ -1,2 +1,8 @@
 /commit_with_llm.py
 /commit_with_llm.bat
+/build/
+/recordings/
+/test-stop-*/
+/test-fault-*/
+__pycache__/
+*.user

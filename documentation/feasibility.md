@@ -43,7 +43,7 @@ The intended product needs external sound-card audio and a depth silhouette. Its
 
 ## 3. Language, build, and dependency strategy
 
-Use **C++20**, the Windows SDK, and CMake presets. C++ provides a direct interface to the sensor library, WASAPI, explicit buffer ownership, and GPU rendering. C could implement much of the application but would still need a bridge to the C++ sensor API. Python can remain an optional analysis convenience, outside capture and distribution. There is no demonstrated technical need for a managed application runtime.
+Use **C++11**, the Windows SDK, and CMake presets, following the implementation-stage language requirement. Keep the core portable where practical and isolate Windows audio/filesystem integration. C++ provides a direct interface to the sensor library, WASAPI, explicit buffer ownership, and GPU rendering. C could implement much of the application but would still need a bridge to the C++ sensor API. Python can remain an optional test/analysis convenience, outside capture and distribution. There is no demonstrated technical need for a managed application runtime.
 
 Use an MSVC x64 toolchain as the initial candidate, with one consistent runtime configuration across native libraries. Choose and pin an actually tested compiler and CMake version during the hardware spike; the project should not promise compatibility with every recent toolchain.
 
