@@ -63,10 +63,11 @@ void generate_depth(DepthFrame& frame, const std::string& pattern) {
     }
 }
 DepthWriter::DepthWriter(const std::string& directory, const std::string& pattern, unsigned rate, unsigned segment_seconds,
-        const std::string& device_id, const std::string& calibration)
+        const std::string& device_id, const std::string& calibration, bool allow_clock_reset)
     : directory_(directory), pattern_(pattern), device_id_(device_id), calibration_(calibration),
       rate_(rate), segment_seconds_(segment_seconds), frames_(0), finalized_segments_(0), file_(0), timing_(0),
-      bytes_(DepthWidth * DepthHeight * 2), first_time_(0), previous_time_(0), gap_count_(0) {
+      bytes_(DepthWidth * DepthHeight * 2), first_time_(0), previous_time_(0), gap_count_(0),
+      allow_clock_reset_(allow_clock_reset), timestamp_epoch_(0), epoch_segment_base_(0) {
     if (!rate_ || !segment_seconds_ || (pattern_ != "gradient" && pattern_ != "noise" && pattern_ != "kinect"))
         throw std::invalid_argument("Invalid depth writer settings");
     create_directories(path_join(directory_, "depth"));
@@ -106,13 +107,18 @@ void DepthWriter::advance(std::uint64_t audio_frames) {
 }
 void DepthWriter::write(const DepthFrame& frame) {
     if (pattern_ != "kinect" || frame.millimetres.size() != DepthWidth * DepthHeight ||
-        frame.relative_time_100ns < 0 || frame.index != frames_ ||
-        (frames_ && (frame.relative_time_100ns <= previous_time_ || frame.receipt_ticks < latest_->receipt_ticks)))
+        frame.relative_time_100ns < 0 || (frames_ && frame.receipt_ticks < latest_->receipt_ticks))
         throw std::runtime_error("Invalid or non-monotonic Kinect depth frame");
+    const bool reset = frames_ && frame.relative_time_100ns <= previous_time_;
+    if (reset && !allow_clock_reset_) throw std::runtime_error("Kinect depth clock reset");
+    if (reset) {
+        ++timestamp_epoch_; first_time_ = frame.relative_time_100ns;
+        epoch_segment_base_ = files_.back().segment + 1;
+    }
     if (!frames_) first_time_ = frame.relative_time_100ns;
-    const bool gap = frames_ && frame.relative_time_100ns - previous_time_ > 500000;
+    const bool gap = reset || (frames_ && frame.relative_time_100ns - previous_time_ > 500000);
     append(std::shared_ptr<DepthFrame>(new DepthFrame(frame)),
-        static_cast<std::uint64_t>(frame.relative_time_100ns - first_time_) / (10000000ULL * segment_seconds_));
+        epoch_segment_base_ + static_cast<std::uint64_t>(frame.relative_time_100ns - first_time_) / (10000000ULL * segment_seconds_));
     previous_time_ = frame.relative_time_100ns;
     if (gap) ++gap_count_;
 }
@@ -132,9 +138,10 @@ void DepthWriter::append(std::shared_ptr<DepthFrame> frame, std::uint64_t segmen
     if (pattern_ == "kinect") {
         const std::int64_t delta = frames_ ? frame->relative_time_100ns - previous_time_ : 0;
         line << ",\"relative_time_100ns\":\"" << frame->relative_time_100ns
+             << "\",\"source_frame\":\"" << frame->index << "\",\"timestamp_epoch\":\"" << timestamp_epoch_
              << "\",\"receipt_ticks\":\"" << frame->receipt_ticks
              << "\",\"sensor_delta_100ns\":\"" << delta
-             << "\",\"gap_before\":" << (delta > 500000 ? "true" : "false")
+             << "\",\"gap_before\":" << (frames_ && (delta <= 0 || delta > 500000) ? "true" : "false")
              << ",\"min_reliable_mm\":" << frame->min_reliable_mm
              << ",\"max_reliable_mm\":" << frame->max_reliable_mm << "}\n";
     } else {
@@ -162,6 +169,7 @@ std::string DepthWriter::json() const {
       << json_string(pattern_ == "kinect" ? "kinect-relative-100ns" : "stored-audio-sample-clock")
       << ",\"timing_resolved\":" << (pattern_ == "kinect" ? "false" : "true")
       << ",\"calibration\":" << calibration_ << ",\"gap_intervals\":" << gap_count_
+      << ",\"clock_resets\":" << timestamp_epoch_
       << ",\"frames\":" << frames_ << ",\"files\":[";
     for (std::size_t i = 0; i < files_.size(); ++i) {
         if (i) s << ',';

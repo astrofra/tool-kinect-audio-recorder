@@ -46,6 +46,8 @@ void usage() {
         "      --ffmpeg overrides automatic selection.\n\n"
         "  --source simulate|wasapi  Default: simulate\n"
         "  --output DIRECTORY       New take directory (never overwritten)\n"
+        "  --timestamp-output       Append local start date/time to --output\n"
+        "  --strict                 Stop on acquisition errors; default logs warnings and continues\n"
         "  --duration SECONDS       Default: 10; 0 records until Ctrl+C\n"
         "  --device ID              WASAPI endpoint ID; default input if omitted\n"
         "  --sample-rate HZ         Simulation: 8000..192000, default 48000\n"
@@ -107,6 +109,8 @@ int run(const std::vector<std::string>& args) {
         const std::string key = args[i];
         if (key == "--help") { usage(); return 0; }
         if (key == "--fast") { o.fast = true; continue; }
+        if (key == "--strict") { o.strict_capture = true; continue; }
+        if (key == "--timestamp-output") { o.timestamped_output = true; continue; }
         if (key == "--encode-depth") { o.encode_depth = true; continue; }
         if (++i == args.size()) throw std::invalid_argument("Missing value for " + key);
         const std::string& v = args[i];
@@ -136,13 +140,21 @@ int run(const std::vector<std::string>& args) {
 #endif
     recorder::Recorder recorder;
     recorder.start(o);
-    std::cout << "Recording " << o.source << " to " << o.output << " (Ctrl+C stops and finalizes)\n";
+    std::cout << "Recording " << o.source << " to " << recorder.status().output << " (Ctrl+C stops and finalizes)\n";
+    std::uint64_t shown_warnings = 0;
+    std::uint64_t next_warning_notice = 0;
     do {
         if (interrupted) recorder.request_stop();
 #ifdef _WIN32
         if (console_stop) recorder.request_stop();
 #endif
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        const recorder::RecorderStatus live = recorder.status();
+        if (live.warnings != shown_warnings && recorder::clock_100ns() >= next_warning_notice) {
+            std::cerr << "Warning (" << live.warnings << " total): " << live.last_warning << '\n';
+            shown_warnings = live.warnings;
+            next_warning_notice = recorder::clock_100ns() + 10000000ULL;
+        }
     } while (recorder.status().active);
     recorder.wait();
     const recorder::RecorderStatus s = recorder.status();
@@ -150,6 +162,7 @@ int run(const std::vector<std::string>& args) {
               << s.format.sample_rate << " Hz, " << std::fixed << std::setprecision(3)
               << static_cast<double>(s.frames) / s.format.sample_rate << " seconds\n";
     if (o.depth_pattern != "off") std::cout << s.depth_frames << " depth frames (512x424, nominal 30 Hz, uint16 millimetres), " << s.depth_gap_intervals << " gap intervals\n";
+    if (s.warnings) std::cout << s.warnings << " warnings saved to " << recorder::path_join(s.output, "timing/events.jsonl") << '\n';
     if (o.encode_depth) {
         std::cout << "Capture finalized; draining background encodings...\n" << std::flush;
         recorder.wait_for_encodings();

@@ -36,7 +36,7 @@ void generate_depth(DepthFrame& frame, const std::string& pattern);
 class DepthWriter {
 public:
     DepthWriter(const std::string& directory, const std::string& pattern, unsigned rate, unsigned segment_seconds,
-        const std::string& device_id = "", const std::string& calibration = "null");
+        const std::string& device_id = "", const std::string& calibration = "null", bool allow_clock_reset = false);
     ~DepthWriter();
     void advance(std::uint64_t audio_frames);
     void write(const DepthFrame& frame);
@@ -66,6 +66,8 @@ private:
     std::shared_ptr<const DepthFrame> latest_;
     std::int64_t first_time_, previous_time_;
     std::uint64_t gap_count_;
+    bool allow_clock_reset_;
+    std::uint64_t timestamp_epoch_, epoch_segment_base_;
 };
 
 // Export one finalized KD16 segment, optionally with its corresponding WAV segment.

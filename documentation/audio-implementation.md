@@ -25,7 +25,7 @@ This is an elapsed-duration display in SMPTE-style notation, not embedded source
 
 Default: 48 kHz, mono, amplitude 0.25, 440 Hz base tone, plus an 80 ms 1 kHz marker each sample-clock second. Markers have 5 ms ramps. `--signal sine` produces only the base tone; the second stereo channel uses 1.5 times the base frequency. `--amplitude 0` generates silence. Simulation writes samples to the recorder and meters; it does not play sound through the speakers.
 
-Real-time mode schedules packets using the monotonic host clock. `--fast` produces the same samples without real-time waiting and explicitly marks timing as `synthetic-unpaced`. Its generated sample timestamps can run ahead of the real receipt clock; those observations must never be used as measurements of device latency. Fast mode waits for writer capacity, while real-time sources stop with an error if the bounded queue fills.
+Real-time mode schedules packets using the monotonic host clock. `--fast` produces the same samples without real-time waiting and explicitly marks timing as `synthetic-unpaced`. Its generated sample timestamps can run ahead of the real receipt clock; those observations must never be used as measurements of device latency. Fast mode waits for writer capacity. Real-time queue overflow logs a warning and skips the incoming packet by default; `--strict` stops capture instead.
 
 Duration is converted once to a whole number of sample frames at the actual sample rate. The final packet is trimmed precisely. A sample frame contains one sample per channel. A zero duration records until Stop/Ctrl+C; unbounded fast simulation is rejected.
 
@@ -35,7 +35,9 @@ Duration is converted once to a whole number of sample frames at the actual samp
 
 WASAPI provides a device sample position and a correlated QPC value in 100 ns units for each packet. Store the original values and flags, including invalid timestamps and silent packets. Integer conversion does not turn a device into a higher-resolution ADC. The native API behavior follows Microsoft's [capture buffer contract](https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudiocaptureclient-getbuffer) and [event-driven initialization](https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclient-initialize).
 
-The initial WASAPI discontinuity flag is retained without treating startup as mid-take loss. Subsequent discontinuities or valid device-position gaps interrupt the take after preserving the received packet and draining queued data. Timestamp-error packets retain their samples and are excluded from continuity comparisons. No packets for five seconds is an explicit capture failure, not a silently successful empty take.
+The initial WASAPI discontinuity flag is retained without treating startup as mid-take loss. Subsequent discontinuities or valid device-position gaps now log warnings and retain the received PCM and native positions without stopping. Timestamp-error packets retain their samples and are excluded from continuity comparisons. No packets for five seconds raises a read error; the default policy journals it, pauses briefly and retries the same source while Kinect acquisition continues. It never switches microphones. Invalid-size/non-finite packets are skipped with a warning. `--strict` restores interruption on source failures, discontinuities and queue overload.
+
+Warning events contain a code, message, occurrence count and first/last host ticks. Pending events are coalesced by code, keeping the diagnostic queue bounded. The writer owns log I/O. The UI reports the count/latest message and **Complete with warnings** after finalization; the manifest retains `state: complete` with `warnings`, `last_warning` and `capture_policy`. The CLI returns zero for warning-only takes. If microphone reads keep failing, a finite take stops after its requested wall duration is reached and the current read/retry finishes; an indefinite take remains stoppable. Initial device-open/configuration and file-write errors remain fatal. Retrying an invalidated device handle is not a guarantee of automatic reconnection.
 
 ## File contract
 
@@ -65,7 +67,7 @@ On Windows, raw receipt ticks use QPC and the saved frequency. Other platforms u
 
 Checkpointing occurs after approximately one second of stored audio, and at orderly finalization. WAV headers and packet/event logs are flushed before an atomic checkpoint describing their committed prefix. A writer failure does not advance the known-good checkpoint. The manifest is also replaced through a temporary sibling. This supports future recovery tooling but does not yet implement a `recover` command or guarantee power-loss durability.
 
-If data is missing, the stored PCM may be a compact prefix plus the flagged packet following a gap; the journal carries the original positions. An Interrupted take must not be treated as a gap-free WAV timeline. Silence insertion and repaired playback/export remain future work.
+If data is missing, the stored PCM contains the received packets without filling gaps; the journal carries the original positions. Both Interrupted takes and completed takes with warnings must be inspected before treating them as a gap-free timeline. Silence insertion and repaired playback/export remain future work.
 
 ## Validation and limits
 

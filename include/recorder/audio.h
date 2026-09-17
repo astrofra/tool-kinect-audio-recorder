@@ -38,6 +38,8 @@ struct RecordOptions {
     unsigned segment_seconds;
     bool fast;
     bool encode_depth;
+    bool strict_capture; // Default: warn and continue after acquisition incidents.
+    bool timestamped_output; // Treat output as a prefix; resolve on every start.
     std::string ffmpeg; // Empty selects the bundled encoder, then PATH.
     RecordOptions();
 };

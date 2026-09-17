@@ -45,19 +45,22 @@ private:
 int main() {
     try {
         Recorder r;
-        for (int mode = 0; mode < 6; ++mode) {
+        for (int strict = 0; strict < 2; ++strict) for (int mode = 0; mode < 6; ++mode) {
             RecordOptions o;
             o.output = "test-kinect-" + std::to_string(clock_ticks());
             o.depth_pattern = "kinect"; o.duration_seconds = 0.15; o.segment_seconds = 1;
+            o.strict_capture = strict != 0;
             r.start(o, std::unique_ptr<AudioSource>(), std::unique_ptr<DepthSource>(new TestDepth(mode)));
             if (mode == 4) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(20)); r.request_stop();
             }
             r.wait();
             const RecorderStatus s = r.status();
+            if (!strict && mode != 3 && mode != 4 && s.state != "Complete with warnings")
+                std::cerr << "Mode " << mode << ": " << s.state << ", audio=" << s.frames << ", error=" << s.error << '\n';
             require(!s.active, "Depth shutdown must join");
             if (mode == 0) {
-                require(s.state == "Complete" && s.depth_frames == 4 && s.frames == 7200, "Native streams drain independently");
+                require(s.state == "Complete with warnings" && s.depth_frames == 4 && s.frames == 7200, "Native streams drain independently");
                 require(s.depth_preview && s.depth_preview->index == 3, "Native preview available");
                 require(s.depth_gap_intervals == 2, "Native gaps exposed to controller");
                 const std::string manifest = contents(path_join(o.output, "manifest.json"));
@@ -82,12 +85,22 @@ int main() {
                 try { export_depth_video(path_join(o.output, "depth/000000.kd16"), path_join(o.output, "invalid.mkv"), "", "unused"); }
                 catch (const std::runtime_error&) { rejected = true; }
                 require(rejected && !path_exists(path_join(o.output, "invalid.mkv")), "Native frames cannot be silently retimed by exporter");
-            } else {
+            } else if (strict || mode == 3 || mode == 4) {
                 require(s.state == "Interrupted" && !s.error.empty(), "Depth faults cannot produce Complete");
                 if (mode == 1) require(s.depth_frames == 2, "Reject sensor clock reset");
                 if (mode == 2) require(s.depth_frames == 3, "Drain captured prefix after disconnect");
                 if (mode == 3 || mode == 4) require(!path_exists(o.output), "No take created before depth readiness");
                 if (mode == 5) require(s.depth_frames == 0, "No generated substitute for missing depth");
+            } else {
+                require(s.state == "Complete with warnings" && s.error.empty() && s.frames == 7200, "Depth incidents must not stop audio");
+                require(s.warnings > 0, "Depth warnings visible in status");
+                if (mode == 1) {
+                    require(s.depth_frames == 4, "Clock reset retains both sensor epochs");
+                    const std::string journal = contents(path_join(o.output, "timing/depth-frames.jsonl"));
+                    require(journal.find("\"timestamp_epoch\":\"1\"") != std::string::npos, "New clock epoch recorded");
+                }
+                if (mode == 2) require(s.depth_frames == 3, "Disconnected depth does not generate substitute images");
+                if (mode == 5) require(s.depth_frames == 0, "Missing depth does not cancel audio");
             }
         }
         std::cout << "Native depth archive, gaps, rotation, faults, cancellation and export protection passed\n";

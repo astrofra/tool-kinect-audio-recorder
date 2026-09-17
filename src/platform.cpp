@@ -4,8 +4,10 @@
 #include <cstring>
 #include <ctime>
 #include <iomanip>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 #ifdef _WIN32
 #include <windows.h>
 #include <direct.h>
@@ -81,9 +83,34 @@ std::string utc_now() {
     return buffer;
 }
 std::string default_take_path() {
-    std::string stamp = utc_now();
-    for (std::size_t i = 0; i < stamp.size(); ++i) if (stamp[i] == ':') stamp[i] = '-';
-    return "recordings/take-" + stamp + "-" + std::to_string(clock_ticks() % 1000000000ULL);
+    return timestamped_take_path("recordings/take");
+}
+std::string timestamped_take_path(const std::string& prefix) {
+    if (prefix.empty()) throw std::invalid_argument("Choose a take path prefix");
+    static std::mutex mutex;
+    static std::int64_t previous = 0;
+    std::lock_guard<std::mutex> lock(mutex);
+    std::int64_t milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    // Also distinguish rapid consecutive starts within one clock millisecond.
+    if (milliseconds <= previous) milliseconds = previous + 1;
+    previous = milliseconds;
+    const std::time_t seconds = static_cast<std::time_t>(milliseconds / 1000);
+    std::tm local;
+#ifdef _WIN32
+    localtime_s(&local, &seconds);
+#else
+    localtime_r(&seconds, &local);
+#endif
+    char stamp[32]; std::strftime(stamp, sizeof(stamp), "%Y-%m-%d_%H-%M-%S", &local);
+    std::ostringstream name;
+    name << prefix;
+    if (prefix.back() == '/' || prefix.back() == '\\') name << "take";
+    name << '-' << stamp << '-' << std::setw(3) << std::setfill('0') << milliseconds % 1000;
+    const std::string base = name.str();
+    std::string candidate = base;
+    for (unsigned suffix = 2; path_exists(candidate); ++suffix) candidate = base + '-' + std::to_string(suffix);
+    return candidate;
 }
 std::string json_string(const std::string& text) {
     std::ostringstream out;
@@ -191,8 +218,16 @@ void write_atomic(const std::string& path, const std::string& content) {
     } catch (...) { std::fclose(file); throw; }
     if (std::fclose(file)) throw std::runtime_error("Metadata close failed");
 #ifdef _WIN32
-    if (!MoveFileExW(from_utf8(temp).c_str(), from_utf8(path).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-        throw std::runtime_error("Cannot commit metadata: " + path);
+    const std::wstring wide_temp = from_utf8(temp), wide_path = from_utf8(path);
+    for (unsigned attempt = 0; ; ++attempt) {
+        if (MoveFileExW(wide_temp.c_str(), wide_path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) break;
+        const DWORD error = GetLastError();
+        // Indexers and virus scanners can briefly deny replacement of a closed
+        // metadata file. Retry only these locking errors, with a bounded delay.
+        if (attempt >= 25 || (error != ERROR_SHARING_VIOLATION && error != ERROR_LOCK_VIOLATION && error != ERROR_ACCESS_DENIED))
+            throw std::runtime_error("Cannot commit metadata: " + path + " (Windows error " + std::to_string(error) + ")");
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
 #else
     if (std::rename(temp.c_str(), path.c_str())) throw std::runtime_error("Cannot commit metadata: " + path);
 #endif

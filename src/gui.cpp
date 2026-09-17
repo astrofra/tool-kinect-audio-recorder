@@ -135,7 +135,7 @@ int run(int argc, char** argv) {
 
     recorder::Recorder recorder;
     recorder::RecordOptions options;
-    char output[2048]; set_text(output, sizeof(output), smoke ? smoke_output : recorder::default_take_path());
+    char output[2048]; set_text(output, sizeof(output), smoke ? smoke_output : "recordings/take");
     int source_choice = 0, device_choice = 0, signal_choice = 0, channels = 1;
     int depth_choice = kinect_smoke ? 3 : 1;
     int sample_rate = 48000;
@@ -146,6 +146,7 @@ int run(int argc, char** argv) {
     std::string ui_error;
     bool was_active = false, smoke_started = false, close_after_stop = false;
     bool encode_depth = true;
+    bool strict_capture = false;
     const std::chrono::steady_clock::time_point began = std::chrono::steady_clock::now();
     int exit_code = 0;
     while (true) {
@@ -212,9 +213,10 @@ int run(int argc, char** argv) {
         bool selected_encoding = encode_depth && (depth_choice == 1 || depth_choice == 2);
         if (ImGui::Checkbox("Encode finished segments to Matroska in background", &selected_encoding)) encode_depth = selected_encoding;
         ImGui::EndDisabled();
-        ImGui::SetNextItemWidth(-120); ImGui::InputText("Take folder", output, sizeof(output));
-        if (ImGui::Button("New take path")) set_text(output, sizeof(output), recorder::default_take_path());
-        ImGui::SameLine(); ImGui::SetNextItemWidth(130); ImGui::InputDouble("Seconds (0 = until Stop)", &duration, 0, 0, "%.2f");
+        ImGui::Checkbox("Stop on capture errors (strict)", &strict_capture);
+        ImGui::SetNextItemWidth(-160); ImGui::InputText("Take path prefix", output, sizeof(output));
+        ImGui::TextDisabled("Record adds the local date and time (milliseconds) for each new take.");
+        ImGui::SetNextItemWidth(130); ImGui::InputDouble("Seconds (0 = until Stop)", &duration, 0, 0, "%.2f");
         ImGui::EndDisabled();
         ImGui::Separator();
         ImGui::BeginDisabled(status.active || close_after_stop);
@@ -226,6 +228,8 @@ int run(int argc, char** argv) {
         ImGui::Text("%s   %.2f s", status.state.c_str(), static_cast<double>(status.frames) / status.format.sample_rate);
         if (record_pressed || (smoke && !smoke_started)) {
             options.output = output; options.source = source_choice == 0 ? "simulate" : "wasapi";
+            options.timestamped_output = !smoke;
+            options.strict_capture = strict_capture;
             options.device_id = device_choice > 0 ? devices[device_choice - 1].id : "";
             options.signal = signal_choice == 0 ? "markers" : "sine";
             options.depth_pattern = depth_choice == 0 ? "off" : depth_choice == 1 ? "gradient" : depth_choice == 2 ? "noise" : "kinect";
@@ -249,6 +253,12 @@ int run(int argc, char** argv) {
         ImGui::Text("%u Hz / %u channel(s) / %llu packets / %llu invalid timestamps", status.format.sample_rate,
             status.format.channels, static_cast<unsigned long long>(status.packets), static_cast<unsigned long long>(status.timestamp_errors));
         if (!status.error.empty()) ImGui::TextWrapped("Recording error: %s", status.error.c_str());
+        if (status.warnings) {
+            ImGui::TextColored(ImVec4(1, 0.75f, 0.25f, 1), "%llu warnings%s", static_cast<unsigned long long>(status.warnings), status.active ? " - capture continues" : "");
+            ImGui::TextWrapped("%s", status.last_warning.c_str());
+            ImGui::TextDisabled("Details: timing/events.jsonl in the take folder");
+        }
+        if (!status.output.empty()) ImGui::TextWrapped("Current take: %s", status.output.c_str());
         if (!ui_error.empty()) ImGui::TextWrapped("%s", ui_error.c_str());
         ImGui::Separator(); ImGui::TextUnformatted("Takes created in this session");
         for (std::size_t i = 0; i < takes.size(); ++i) {

@@ -17,6 +17,8 @@ struct RecorderStatus {
     std::uint64_t timestamp_errors;
     std::uint64_t depth_frames;
     std::uint64_t depth_gap_intervals;
+    std::uint64_t warnings;
+    std::string last_warning;
     std::shared_ptr<const DepthFrame> depth_preview;
     float peak[2];
     float rms[2];

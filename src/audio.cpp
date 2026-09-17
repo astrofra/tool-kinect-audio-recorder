@@ -8,7 +8,8 @@
 
 namespace recorder {
 RecordOptions::RecordOptions() : source("simulate"), signal("markers"), depth_pattern("off"), sample_rate(48000),
-    channels(1), frequency(440.0), amplitude(0.25), duration_seconds(0), segment_seconds(60), fast(false), encode_depth(false) {}
+    channels(1), frequency(440.0), amplitude(0.25), duration_seconds(0), segment_seconds(60), fast(false), encode_depth(false),
+    strict_capture(false), timestamped_output(false) {}
 
 void validate_options(const RecordOptions& o) {
     if (o.output.empty()) throw std::invalid_argument("Choose an output directory");

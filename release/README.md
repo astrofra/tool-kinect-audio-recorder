@@ -7,8 +7,10 @@ edit `packaging/README.md` or the source, then rebuild.
 ## Run
 
 Double-click `audio_recorder.exe` for the Dear ImGui/GLFW interface. Simulation
-is selected by default: choose a new recording folder and press **Record**, then
-**Stop**. No audio hardware is needed for simulation. A graphics driver supporting
+is selected by default: choose a **Take path prefix** and press **Record**, then
+**Stop**. Each Record click appends the local date/time to milliseconds, e.g.
+`take-2026-09-17_10-02-44-872`; you can reuse the prefix for successive takes.
+No audio hardware is needed for simulation. A graphics driver supporting
 OpenGL 3.3 is required for the interface.
 
 The large counter at the top displays elapsed recorded audio as `HH:MM:SS:FF`
@@ -40,7 +42,9 @@ From PowerShell in this folder:
 .\recording_tool.exe record --source wasapi --output recordings\microphone --duration 0
 ```
 
-Use a different output folder for each take. Each take contains segmented float32
+The GUI chooses a new timestamped folder for each take. In the CLI, add
+`--timestamp-output` to reuse an `--output` prefix; an exact existing output
+directory is still protected. Each take contains segmented float32
 WAV audio, a JSON manifest, and timing journals, plus raw `.kd16` segments when
 depth is enabled. Simulation generates samples but does not play them through
 speakers. Playback, rendered video proxies, and DaVinci Resolve XML conform are
@@ -60,6 +64,14 @@ Physical depth retains native sensor timestamps, calibration and uint16 millimet
 Its segments are independent of audio segments. Video export remains simulation-only
 until a calibrated audio/depth timing solution is implemented. Simulation and audio-only
 recording work without the Kinect runtime.
+
+Capture continues through acquisition warnings by default, including audio
+discontinuities and temporary Kinect/audio read failures. The GUI shows the count
+and latest warning; `timing/events.jsonl` stores the details. Missing data is not
+filled with fake images or silence. Enable **Stop on capture errors (strict)** or
+CLI `--strict` to stop on acquisition errors. Startup configuration/device failures
+and disk write failures remain blocking. A finalized take with warnings is shown
+as **Complete with warnings** and returns CLI exit code 0.
 
 To record depth from the CLI and optionally export one segment as lossless video:
 

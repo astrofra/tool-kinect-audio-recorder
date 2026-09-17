@@ -12,6 +12,8 @@ std::uint64_t clock_frequency();
 std::uint64_t frames_to_100ns(std::uint64_t frames, unsigned rate);
 std::string utc_now();
 std::string default_take_path();
+// Local wall-clock date/time down to milliseconds; never chooses an existing path.
+std::string timestamped_take_path(const std::string& prefix);
 std::string json_string(const std::string& text);
 std::string path_join(const std::string& directory, const std::string& leaf);
 void create_directories(const std::string& path);

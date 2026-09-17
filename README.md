@@ -26,7 +26,9 @@ ctest --preset windows
 .\build\windows\Release\audio_recorder.exe
 ```
 
-The GUI defaults to simulation. Choose a new take folder, press **Record**, then **Stop**. The meters display the recorded signal; no microphone, speakers, or headset are required for simulation. Recorded WAVs can be opened in an audio player/editor. This first UI lists takes created during the current application session.
+The GUI defaults to simulation. Choose a **Take path prefix** (default `recordings/take`), press **Record**, then **Stop**. Every Record click appends the local start date/time down to milliseconds, for example `recordings/take-2026-09-17_10-02-44-872`. You can restart immediately with the same prefix; previous takes are preserved. The actual path appears under **Current take** and in the session history. The meters display the recorded signal; no microphone, speakers, or headset are required for simulation. Recorded WAVs can be opened in an audio player/editor.
+
+Capture now **continues with warnings by default** after audio discontinuities, invalid timestamps, transient audio/Kinect read failures or a full acquisition queue. Warnings appear in the GUI and `timing/events.jsonl`; the manifest includes their count and the capture policy. Stop drains and finalizes the available data as **Complete with warnings**. Missing samples/images are not invented, so warnings still matter for later synchronization. Enable **Stop on capture errors (strict)** or CLI `--strict` to restore fail-fast acquisition. Invalid startup settings, unavailable devices during initial preparation and disk write failures remain errors.
 
 A large elapsed timecode stays visible at the top: `HH:MM:SS:FF`, at **30 fps non-drop**. It follows the stored audio sample count, keeps the final value after Stop, and resets for each new recording.
 
@@ -45,7 +47,7 @@ cmake --build --preset windows --parallel
 
 In the GUI, choose **Kinect v2 (Microsoft SDK 2.0)** for depth and **Windows microphone (WASAPI)** for audio. Choose the desired microphone endpoint explicitly. Real-time simulated audio can also accompany physical depth for testing. The Kinect runtime is loaded only when the sensor is selected, so simulation and microphone-only capture still work without it.
 
-Native depth is stored without resampling or clamping, with sensor ID, depth intrinsics, reliable-distance limits, sensor timestamps and host receipt observations. Startup waits up to 15 seconds for a frame; a five-second stream stall interrupts and finalizes the take. Native depth segments rotate on sensor time and **do not pair by filename with audio segments**. Background/manual video export currently supports simulation only; physical capture needs a resolved audio/depth timing solution first. See [Kinect implementation and format](documentation/kinect-implementation.md).
+Native depth is stored without resampling or clamping, with sensor ID, depth intrinsics, reliable-distance limits, sensor timestamps and host receipt observations. Startup waits up to 15 seconds for a frame; a five-second stream stall produces a warning and retries while the other stream continues. Native depth segments rotate on sensor time and **do not pair by filename with audio segments**. Background/manual video export currently supports simulation only; physical capture needs a resolved audio/depth timing solution first. See [Kinect implementation and format](documentation/kinect-implementation.md).
 
 **Encode finished segments to Matroska in background** is enabled by default in the GUI. Each closed depth/audio pair is queued as `video/000000.mkv`, etc. One worker runs one FFmpeg process at a time, at reduced CPU priority with two codec threads. The queue panel shows pending, completed and failed jobs across takes. Stop requests capture finalization without waiting for encoding; you can start another take as soon as capture finishes. Closing the window drains the queue with the interface still responsive. The raw recordings are always retained.
 
@@ -64,6 +66,8 @@ Native depth is stored without resampling or clamping, with sensor ID, depth int
 ```
 
 Use `--device "<endpoint ID>"` to select a specific microphone. WASAPI uses the endpoint's native shared-mode sample rate and mono/stereo layout, displayed in the GUI and saved in the manifest. It does not silently switch devices. `--help` lists simulation and file-rotation options. Existing take directories are never overwritten.
+
+An explicit CLI `--output` remains an exact directory. Add `--timestamp-output` to use it as a reusable prefix, e.g. `record --output recordings/interview --timestamp-output --depth kinect --source wasapi --duration 10`. Warning-only takes return exit code 0; errors still return nonzero.
 
 ## Simulated depth and lossless video
 

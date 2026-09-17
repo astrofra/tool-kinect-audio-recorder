@@ -37,7 +37,13 @@ with tempfile.TemporaryDirectory(prefix="encoding-tests-") as temp:
         while process.poll() is None and time.monotonic() < deadline:
             if (take / "video/000000.mkv").exists():
                 # The capture manifest is atomically replaced independently of the worker.
-                manifest = json.loads((take / "manifest.json").read_text())
+                try:
+                    manifest = json.loads((take / "manifest.json").read_text())
+                except PermissionError:
+                    # Windows may briefly deny reads during replacement. The
+                    # outer deadline still bounds retries; malformed JSON fails.
+                    time.sleep(0.02)
+                    continue
                 overlapped |= manifest["state"] == "recording"
             time.sleep(0.02)
         stdout, stderr = process.communicate(timeout=5)

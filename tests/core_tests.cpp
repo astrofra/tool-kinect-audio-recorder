@@ -4,12 +4,18 @@
 #include <chrono>
 #include <cmath>
 #include <iostream>
+#include <fstream>
+#include <iterator>
+#include <regex>
 #include <stdexcept>
 #include <thread>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 class FaultSource : public recorder::AudioSource {
 public:
-    explicit FaultSource(int mode) : mode_(mode), index_(0), origin_(0) {}
+    explicit FaultSource(int mode) : mode_(mode), index_(0), origin_(0), failed_(false) {}
     recorder::AudioFormat open() { return recorder::AudioFormat(48000, 1); }
     unsigned max_packet_frames() const { return 480; }
     std::string name() const { return "fault-test"; }
@@ -18,6 +24,7 @@ public:
     bool read(recorder::AudioPacket& p, const std::atomic<bool>& stop) {
         if (stop) return false;
         if (mode_ == 2 && index_ == 3) throw std::runtime_error("Injected source failure");
+        if (mode_ == 3 && index_ == 1 && !failed_) { failed_ = true; throw std::runtime_error("Injected temporary audio failure"); }
         p.samples.assign(480, 0.1f);
         p.device_frame = index_ * 480 + (mode_ == 0 && index_ > 0 ? 480 : 0);
         p.timestamp_100ns = origin_ + recorder::frames_to_100ns(p.device_frame, 48000);
@@ -32,6 +39,7 @@ private:
     int mode_;
     unsigned index_;
     std::uint64_t origin_;
+    bool failed_;
 };
 
 static void require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
@@ -71,14 +79,44 @@ int main() {
         // A new capture on the same Recorder must reset its state and reject overwriting a take.
         recorder.start(o); recorder.wait();
         require(recorder.status().state == "Interrupted", "Existing take cannot be overwritten");
-        for (int mode = 0; mode < 3; ++mode) {
+        const std::string prefix = "test-stop-repeat-" + std::to_string(clock_ticks());
+        o.output = prefix; o.timestamped_output = true; o.duration_seconds = 0.02; o.fast = true;
+        recorder.start(o); recorder.wait(); const std::string first_take = recorder.status().output;
+        recorder.start(o); recorder.wait(); const std::string second_take = recorder.status().output;
+        require(recorder.status().error.empty() && first_take != second_take, "Record can restart with the same prefix");
+        require(path_exists(path_join(first_take, "manifest.json")) && path_exists(path_join(second_take, "manifest.json")), "Both takes preserved");
+        require(std::regex_match(first_take.substr(prefix.size()), std::regex("-[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{3}(-[0-9]+)?")), "Take name contains a readable launch timestamp");
+        require(default_take_path() != default_take_path(), "Sub-millisecond default paths are unique");
+#ifdef _WIN32
+        const std::string metadata = path_join(first_take, "lock-test.json");
+        write_atomic(metadata, "old");
+        HANDLE held = CreateFileW(from_utf8(metadata).c_str(), GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+        require(held != INVALID_HANDLE_VALUE, "Hold metadata without delete sharing");
+        std::thread release_lock([held] { std::this_thread::sleep_for(std::chrono::milliseconds(60)); CloseHandle(held); });
+        try { write_atomic(metadata, "new"); } catch (...) { release_lock.join(); throw; }
+        release_lock.join();
+        std::ifstream updated(metadata.c_str()); std::string value; updated >> value;
+        require(value == "new", "Brief Windows metadata locks are retried");
+#endif
+        o.timestamped_output = false;
+        for (int strict = 0; strict < 2; ++strict) for (int mode = 0; mode < 4; ++mode) {
+            o.strict_capture = strict != 0;
             o.output = "test-fault-" + std::to_string(clock_ticks()); o.fast = true; o.duration_seconds = 0.04;
+            if (mode == 3) o.duration_seconds = 0.5;
             recorder.start(o, std::unique_ptr<AudioSource>(new FaultSource(mode))); recorder.wait();
             const RecorderStatus s = recorder.status();
             require(s.depth_frames == depth_frames_for_audio(s.frames, s.format.sample_rate), "Fault drains both streams");
-            if (mode == 0) require(s.state == "Interrupted" && s.frames == 960, "Gap stops capture and preserves queued prefix");
-            if (mode == 1) require(s.state == "Complete" && s.frames == 1920 && s.timestamp_errors == 1, "Invalid timestamps retain samples and quality flags");
-            if (mode == 2) require(s.state == "Interrupted" && s.frames == 1440, "Source exception drains queued audio");
+            if (mode == 0) require(strict ? (s.state == "Interrupted" && s.frames == 960) :
+                (s.state == "Complete with warnings" && s.frames == 1920 && s.warnings == 1), "Audio gap obeys selected policy");
+            if (mode == 1) require(s.state == "Complete with warnings" && s.frames == 1920 && s.timestamp_errors == 1, "Invalid timestamps retain samples and quality flags");
+            if (mode == 2) require(s.frames == 1440 && (strict ? s.state == "Interrupted" : s.state == "Complete with warnings"), "Source exceptions retain data and finite takes finish");
+            if (mode == 3) require(strict ? s.state == "Interrupted" :
+                (s.frames == 24000 && s.state == "Complete with warnings"), "Temporary audio failure resumes capture");
+            if (!strict) {
+                std::ifstream events(path_join(o.output, "timing/events.jsonl").c_str());
+                const std::string text((std::istreambuf_iterator<char>(events)), std::istreambuf_iterator<char>());
+                require(text.find("\"type\":\"warning\"") != std::string::npos, "Warnings persisted in the event journal");
+            }
         }
         std::cout << "Core, simulation, stop/finalization, overwrite, discontinuity and source-failure tests passed\n";
         return 0;
