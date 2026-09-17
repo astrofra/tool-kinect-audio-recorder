@@ -49,6 +49,43 @@ In the GUI, choose **Kinect v2 (Microsoft SDK 2.0)** for depth and **Windows mic
 
 Native depth is stored without resampling or clamping, with sensor ID, depth intrinsics, reliable-distance limits, sensor timestamps and host receipt observations. Startup waits up to 15 seconds for a frame; a five-second stream stall produces a warning and retries while the other stream continues. Native depth segments rotate on sensor time and **do not pair by filename with audio segments**. Silent RGB review videos are available for physical capture; synchronized archival audio/depth export still needs a resolved timing solution. See [Kinect implementation and format](documentation/kinect-implementation.md).
 
+## Troubleshooting
+
+### Kinect v2 repeatedly disconnects on Windows 11
+
+**Disable audio enhancements on the Kinect microphone.** On the development PC,
+Windows Voice Clarity was associated with that input. The user confirmed that
+turning audio enhancements off resolved the repeated disconnections on
+17 September 2026.
+
+The observed symptoms were:
+
+- The Kinect light went off and on while the adapter's power light stayed on.
+- Windows logged recurring USB removals: event **1010** in
+  `Microsoft-Windows-Kernel-PnP/Device Management`.
+- Disconnects were about **16.26 seconds apart** on average across 12 measured
+  intervals; this is an observed cycle, not a fixed Kinect timeout.
+- Depth capture had long gaps, and microphone audio stopped after about six seconds
+  with `0x88890004` (`AUDCLNT_E_DEVICE_INVALIDATED`).
+- A second Kinect on the same adapter, cable and USB port showed the same problem.
+
+To apply the confirmed fix:
+
+1. Stop the current recording.
+2. Open **Windows Settings > System > Sound > Input**.
+3. Select **Microphone Array (Xbox NUI Sensor)**. A replacement Kinect may appear
+   as **Microphone Array (2- Xbox NUI Sensor)**.
+4. Set **Audio enhancements** to **Off** (French: **Améliorations audio > Désactivé**).
+5. Start a new recording of at least **45 seconds** and check that the sensor stays
+   on and both audio and depth continue throughout the take.
+
+This setting belongs to the selected audio endpoint: check it again after changing
+Kinect sensors. The recorder does not change this Windows setting automatically.
+Continuing with warnings keeps a take running but does not prevent USB disconnects
+or restore missing data from an earlier take.
+
+Related guidance: [Kinect disconnect loop and Windows audio enhancements](https://ar-sandbox.eu/docs/kinectsandbox-software/troubleshooting/).
+
 ## RGB review videos
 
 **Create RGB Matroska preview after Stop** is enabled by default in the GUI for both Kinect and simulated depth. Once the take is finalized, the encoding queue creates **`video/preview-rgb.mkv`**, combining all depth segments. Open it in a player supporting FFV1/Matroska, such as VLC. **Review an existing take** also accepts an earlier take folder and queues the same export. Existing videos are never overwritten.

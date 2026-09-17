@@ -125,6 +125,38 @@ or `export-preview` (use a new output name if a failed attempt left a `.part`/`.
 CPU priority does not eliminate disk contention: test sustained recordings on
 the intended machine. Uncheck automatic encoding before the next take if needed.
 
+## Troubleshooting
+
+### Kinect v2 repeatedly disconnects on Windows 11
+
+**Disable audio enhancements on the Kinect microphone.** On the development PC,
+Windows Voice Clarity was associated with that input. The user confirmed that
+turning audio enhancements off resolved the repeated disconnections on
+17 September 2026.
+
+The Kinect light cycled off and on while the adapter's power light stayed on.
+Windows logged USB removals as event **1010** in
+`Microsoft-Windows-Kernel-PnP/Device Management`. Disconnects were about
+**16.26 seconds apart** on average across 12 measured intervals (an observed
+cycle, not a fixed timeout). Depth had long gaps, and microphone audio stopped
+after about six seconds with `0x88890004` (`AUDCLNT_E_DEVICE_INVALIDATED`).
+A second Kinect on the same adapter, cable and USB port showed the same problem.
+
+1. Stop the current recording.
+2. Open **Windows Settings > System > Sound > Input**.
+3. Select **Microphone Array (Xbox NUI Sensor)**, or
+   **Microphone Array (2- Xbox NUI Sensor)** for a replacement sensor.
+4. Set **Audio enhancements** to **Off** (French: **Améliorations audio > Désactivé**).
+5. Start a new recording of at least **45 seconds** and check that the sensor stays
+   on and both audio and depth continue throughout the take.
+
+This setting belongs to the selected audio endpoint: check it again after changing
+Kinect sensors. The recorder does not change this Windows setting automatically.
+Continuing with warnings keeps a take running but does not prevent USB disconnects
+or restore missing data from an earlier take.
+
+Related guidance: [Kinect disconnect loop and Windows audio enhancements](https://ar-sandbox.eu/docs/kinectsandbox-software/troubleshooting/).
+
 ## Package contents
 
 - `audio_recorder.exe`: desktop interface.
