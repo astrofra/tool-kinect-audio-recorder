@@ -1,6 +1,6 @@
 # Kinect Audio Recorder
 
-A Windows interview recorder with Kinect v2 depth capture, WASAPI audio and hardware-free audio/depth simulation. The capture core, simulators, file writers, and CLI use **C++11** and CMake. The desktop interface uses **Dear ImGui + GLFW**. Playback, synchronization fitting and the XML editing workflow remain future work.
+A Windows interview recorder with Kinect v2 depth capture, WASAPI audio and hardware-free audio/depth simulation. The capture core, simulators, file writers, and CLI use **C++11** and CMake. The desktop interface uses **Dear ImGui + GLFW**. Embedded playback, synchronization fitting and the XML editing workflow remain future work.
 
 ## Build on Windows
 
@@ -34,13 +34,25 @@ ctest --preset windows
 .\build\windows\Release\audio_recorder.exe
 ```
 
-The GUI defaults to simulation. Choose a **Take path prefix** (default `recordings/take`), press **Record**, then **Stop**. Every Record click appends the local start date/time down to milliseconds, for example `recordings/take-2026-09-17_10-02-44-872`. You can restart immediately with the same prefix; previous takes are preserved. The actual path appears under **Current take** and in the session history. The meters display the recorded signal; no microphone, speakers, or headset are required for simulation. Recorded WAVs can be opened in an audio player/editor.
+The French Dear ImGui interface follows the supplied [GUI concept](documentation/recorder-gui-concept.png): transport and timecode above a large RGB depth preview and vertical audio meters, with encoding, journal and disk space below. On first launch it defaults to simulation. Choose the audio/video inputs, press **Enregistrer**, then **Arrêter**. **Paramètres** contains the take path prefix (default `recordings/take`) and other capture options. Each new take appends local date/time down to milliseconds, for example `recordings/take-2026-09-17_10-02-44-872`. Previous takes are preserved. **Prises** and **Journal** expose the saved path. No hardware is required for simulation.
 
-Capture now **continues with warnings by default** after audio discontinuities, invalid timestamps, transient audio/Kinect read failures or a full acquisition queue. Warnings appear in the GUI and `timing/events.jsonl`; the manifest includes their count and the capture policy. Stop drains and finalizes the available data as **Complete with warnings**. Missing samples/images are not invented, so warnings still matter for later synchronization. Enable **Stop on capture errors (strict)** or CLI `--strict` to restore fail-fast acquisition. Invalid startup settings, unavailable devices during initial preparation and disk write failures remain errors.
+![Recorder interface during a simulated take](documentation/recorder-gui.png)
+
+## Gain, transport and saved settings
+
+The **Gain** knob applies **-24 to +36 dB** of software gain to all channels **before WAV storage and metering**. Drag it, use the wheel, or edit the numeric value; double-click resets it to 0 dB. It remains adjustable while recording. Short ramps soften live changes, and red indicators warn at 0 dBFS. Float32 files retain values above full scale without hard clipping; reduce gain to avoid clipping during playback. This does not change Windows microphone volume or audio enhancements. CLI equivalent: `record --gain-db 30 ...`.
+
+**Pause / Reprendre** suspends and resumes storage within the same take. Audio and depth devices stay open; samples and images received during the pause are discarded, and the stored-audio timecode stops after pending writes drain. Pause/resume events and resumed packet/frame boundaries are journaled. Native Kinect timestamps remain unchanged, so the silent RGB review holds the last image over a pause. **Lecture** opens the last completed `video/preview-rgb.mkv` in the associated external player. It becomes available after encoding; in-app playback and synchronized preview sound are not implemented.
+
+The GUI automatically saves **`recorder.ini` beside the executable** (normally `release/recorder.ini`), after edits settle and on exit. It remembers the audio endpoint ID/name, video source, gain, session name, output prefix, duration/rotation, capture policy, simulation parameters, encoding options, last take and window size/maximized state. Missing selected microphones remain selected and report an error rather than switching inputs. Relative paths are anchored to the INI directory, so the launch directory does not change the output location.
+
+A starting file is shipped as **`recorder.example.ini`**. Manual edits use UTF-8 and take effect on the next launch; unknown keys are retained, and invalid individual values are reported in the journal. `audio_recorder --config PATH.ini` selects another configuration. The CLI uses its explicit arguments independently. Rebuilds preserve the personal INI and update only the example; neither the personal INI nor recordings belong in Git.
+
+Capture **continues with warnings by default** after audio discontinuities, invalid timestamps, transient audio/Kinect read failures or a full acquisition queue. Warnings appear in **Journal** and `timing/events.jsonl`; the manifest includes their count and policy. Arrêter drains and finalizes available data. Missing samples/images are not invented, so warnings still matter for later synchronization. Enable **Paramètres > Arrêter sur erreur de capture (strict)** or CLI `--strict` to restore fail-fast acquisition. Invalid startup settings, unavailable devices during initial preparation and disk write failures remain errors.
 
 A large elapsed timecode stays visible at the top: `HH:MM:SS:FF`, at **30 fps non-drop**. It follows the stored audio sample count, keeps the final value after Stop, and resets for each new recording.
 
-The **Depth source** selector defaults to a simulated moving gradient; noise, audio-only and **Kinect v2 (Microsoft SDK 2.0)** modes are also available. The GUI previews the latest stored depth image. Simulation uses 512 x 424 uint16 millimetres at 30 Hz, driven by the audio sample timeline. Physical Kinect capture retains independent native timestamps.
+The **Entrée vidéo** selector defaults to a simulated moving gradient; noise, audio-only and **Kinect v2 — Capteur** modes are also available. The GUI previews the latest stored depth image in RGB, preserving its aspect ratio. Simulation uses 512 x 424 uint16 millimetres at 30 Hz, driven by the audio sample timeline. Physical Kinect capture retains independent native timestamps.
 
 ## Kinect v2 capture on Windows
 
@@ -53,7 +65,7 @@ cmake --build --preset windows --parallel
 .\build\windows\Release\recording_tool.exe record --depth kinect --source wasapi --output recordings\kinect-test --duration 10
 ```
 
-In the GUI, choose **Kinect v2 (Microsoft SDK 2.0)** for depth and **Windows microphone (WASAPI)** for audio. Choose the desired microphone endpoint explicitly. Real-time simulated audio can also accompany physical depth for testing. The Kinect runtime is loaded only when the sensor is selected, so simulation and microphone-only capture still work without it.
+In the GUI, choose **Kinect v2 — Capteur** under **Entrée vidéo** and the desired microphone under **Entrée audio**. Windows inputs use WASAPI; **Entrée Windows par défaut** follows the default endpoint at the start of each take. Real-time simulated audio can also accompany physical depth for testing. The Kinect runtime is loaded only when selected.
 
 Native depth is stored without resampling or clamping, with sensor ID, depth intrinsics, reliable-distance limits, sensor timestamps and host receipt observations. Startup waits up to 15 seconds for a frame; a five-second stream stall produces a warning and retries while the other stream continues. Native depth segments rotate on sensor time and **do not pair by filename with audio segments**. Silent RGB review videos are available for physical capture; synchronized archival audio/depth export still needs a resolved timing solution. See [Kinect implementation and format](documentation/kinect-implementation.md).
 
@@ -99,9 +111,9 @@ Related guidance: [Kinect disconnect loop and Windows audio enhancements](https:
 Older builds rejected audio inputs with more than two channels. With audio
 enhancements disabled, the Kinect microphone on the development PC exposes
 **4 channels at 16 kHz, float32**. Keep enhancements **Off** and use the updated
-recorder, which accepts **1 to 32 input channels**. Select **Windows microphone
-(WASAPI)**, choose the Kinect microphone and start a new take. The actual input
-name, sample rate and one meter per channel appear below the recording controls.
+recorder, which accepts **1 to 32 input channels**. Choose the Kinect microphone under **Entrée audio** and start a new take. The audio
+panel shows the sample rate and one meter per channel; **Journal** identifies the
+actual input used.
 
 All channels are stored in their original order in a single multichannel WAV;
 they are not mixed down to mono/stereo. If a player cannot play that layout,
@@ -109,7 +121,7 @@ open the WAV in an audio editor that supports multichannel files.
 
 ## RGB review videos
 
-**Create RGB Matroska preview after Stop** is enabled by default in the GUI for both Kinect and simulated depth. Once the take is finalized, the encoding queue creates **`video/preview-rgb.mkv`**, combining all depth segments. Open it in a player supporting FFV1/Matroska, such as VLC. **Review an existing take** also accepts an earlier take folder and queues the same export. Existing videos are never overwritten.
+**Paramètres > Créer l’aperçu RGB après Arrêter** is enabled by default in the GUI for both Kinect and simulated depth. Once the take is finalized, the encoding queue creates **`video/preview-rgb.mkv`**, combining all depth segments. Open it in a player supporting FFV1/Matroska, such as VLC. **Prises > Exporter l’aperçu RGB** also accepts an earlier take folder and queues the same export. Existing videos are never overwritten.
 
 ```powershell
 .\release\recording_tool.exe export-preview --input release\recordings\take-2026-09-17_10-14-55-323
@@ -121,7 +133,7 @@ The 512 x 424 video uses exactly the GUI palette: blue near, green midway, red f
 
 The preview is **silent**. Kinect review timing uses host receipt timestamps relative to the first depth image, rounded to a 30 fps playback grid; simulation uses its sample timeline. Gaps hold the last image, and the video ends one playback frame after the last stored image. Multiple arrivals in one playback slot retain the latest image. Sensor-clock resets do not collapse pauses. This is a visual review, not a calibrated synchronization export. Encoding runs after Stop on the existing background queue; a new take can begin while it finishes.
 
-**Encode finished segments to Matroska in background** is enabled by default in the GUI. Each closed depth/audio pair is queued as `video/000000.mkv`, etc. One worker runs one FFmpeg process at a time, at reduced CPU priority with two codec threads. The queue panel shows pending, completed and failed jobs across takes. Stop requests capture finalization without waiting for encoding; you can start another take as soon as capture finishes. Closing the window drains the queue with the interface still responsive. The raw recordings are always retained.
+**Paramètres > Encoder les segments simulés en Matroska** is enabled by default in the GUI. Each closed depth/audio pair is queued as `video/000000.mkv`, etc. One worker runs one FFmpeg process at a time, at reduced CPU priority with two codec threads. The queue bar counts completed jobs across takes; the journal reports failures. Stop requests capture finalization without waiting for encoding; you can start another take as soon as capture finishes. Closing the window drains the queue with the interface still responsive. The raw recordings are always retained.
 
 ## Command line
 
@@ -169,6 +181,6 @@ The core build requires CMake 3.16+ and a C++11 compiler, with no downloaded lib
 
 Each take contains `manifest.json`, `checkpoint.json`, segmented `audio/*.wav` files, and `timing/*.jsonl` journals. Audio is uncompressed IEEE float32 PCM, rotated every 60 seconds by default. Multichannel WAVs use WAVEFORMATEXTENSIBLE with the source channel mask; an unspecified microphone array layout stays unspecified. Longer configured segments are shortened when necessary to stay within the 4 GiB RIFF limit, with a logged warning and the effective `segment_seconds` in the manifest. Packet metadata preserves sample positions, native timing, receipt-clock observations, and error flags for future Kinect synchronization.
 
-Depth-enabled takes additionally contain `depth/*.kd16` and `timing/depth-frames.jsonl`. Simulated depth rotates with audio, and its last frame can extend less than one video frame beyond the audio end. Kinect depth rotates independently on the sensor timeline; its journal is authoritative. Audio samples are unchanged.
+Depth-enabled takes additionally contain `depth/*.kd16` and `timing/depth-frames.jsonl`. Simulated depth rotates with audio, and its last frame can extend less than one video frame beyond the audio end. Kinect depth rotates independently on the sensor timeline; its journal is authoritative. Stored audio includes the selected software gain; native source timing is retained.
 
 See [the implemented audio milestone](documentation/audio-implementation.md) for format details, tests, and current limits, and [the design documentation](documentation/README.md) for the complete planned tool.

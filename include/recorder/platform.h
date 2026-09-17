@@ -17,6 +17,7 @@ std::string default_take_path();
 std::string timestamped_take_path(const std::string& prefix);
 std::string json_string(const std::string& text);
 std::string path_join(const std::string& directory, const std::string& leaf);
+std::string absolute_path(const std::string& path);
 void create_directories(const std::string& path);
 void create_new_directory(const std::string& path);
 bool path_exists(const std::string& path);

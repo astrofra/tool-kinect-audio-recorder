@@ -23,14 +23,13 @@ extern char** environ;
 #endif
 
 namespace recorder {
-std::string default_ffmpeg_path() {
+std::string executable_directory() {
     std::string executable;
 #ifdef _WIN32
     std::vector<wchar_t> buffer(32768);
     const DWORD length = GetModuleFileNameW(0, buffer.data(), static_cast<DWORD>(buffer.size()));
     if (!length || length >= buffer.size()) throw std::runtime_error("Cannot locate the recorder executable");
     executable = to_utf8(std::wstring(buffer.data(), length));
-    const char* relative = "extern/ffmpeg/ffmpeg.exe";
 #elif defined(__APPLE__)
     std::uint32_t size = 0;
     _NSGetExecutablePath(0, &size);
@@ -39,7 +38,6 @@ std::string default_ffmpeg_path() {
         char* resolved = realpath(buffer.data(), 0);
         if (resolved) { executable = resolved; std::free(resolved); }
     }
-    const char* relative = "extern/ffmpeg/ffmpeg";
 #else
     std::vector<char> buffer(4096);
     for (;;) {
@@ -51,11 +49,18 @@ std::string default_ffmpeg_path() {
         if (buffer.size() >= 1024 * 1024) break;
         buffer.resize(buffer.size() * 2);
     }
-    const char* relative = "extern/ffmpeg/ffmpeg";
 #endif
     const std::size_t separator = executable.find_last_of("/\\");
-    if (separator != std::string::npos) {
-        const std::string bundled = path_join(executable.substr(0, separator), relative);
+    return separator != std::string::npos ? executable.substr(0, separator) : ".";
+}
+std::string default_ffmpeg_path() {
+#ifdef _WIN32
+    const char* relative = "extern/ffmpeg/ffmpeg.exe";
+#else
+    const char* relative = "extern/ffmpeg/ffmpeg";
+#endif
+    {
+        const std::string bundled = path_join(executable_directory(), relative);
         if (path_exists(bundled)) return bundled;
     }
     return "ffmpeg";

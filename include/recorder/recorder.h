@@ -23,6 +23,8 @@ struct RecorderStatus {
     std::vector<float> peak;
     std::vector<float> rms;
     bool active;
+    bool paused;
+    double gain_db;
     RecorderStatus();
 };
 
@@ -35,6 +37,8 @@ public:
     void start(const RecordOptions& options, std::unique_ptr<AudioSource> source = std::unique_ptr<AudioSource>(),
         std::unique_ptr<DepthSource> depth = std::unique_ptr<DepthSource>());
     void request_stop();
+    void set_paused(bool paused);
+    void set_gain_db(double gain);
     void wait();
     RecorderStatus status() const;
     EncodingStatus encoding_status() const { return encodings_.status(); }
@@ -47,6 +51,8 @@ private:
     mutable std::mutex mutex_;
     RecorderStatus status_;
     std::atomic<bool> stop_;
+    std::atomic<bool> paused_;
+    std::atomic<double> gain_db_;
     std::thread thread_;
     EncodingQueue encodings_; // Survives Stop/start; wait() joins acquisition only.
 };

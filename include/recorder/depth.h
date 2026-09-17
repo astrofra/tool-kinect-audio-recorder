@@ -13,9 +13,10 @@ struct DepthFrame {
     std::int64_t relative_time_100ns;
     std::uint64_t receipt_ticks;
     unsigned min_reliable_mm, max_reliable_mm;
+    bool pause_boundary;
     std::vector<std::uint16_t> millimetres;
     explicit DepthFrame(std::uint64_t i = 0) : index(i), relative_time_100ns(0), receipt_ticks(0),
-        min_reliable_mm(0), max_reliable_mm(0), millimetres(DepthWidth * DepthHeight) {}
+        min_reliable_mm(0), max_reliable_mm(0), pause_boundary(false), millimetres(DepthWidth * DepthHeight) {}
 };
 class DepthSource {
 public:

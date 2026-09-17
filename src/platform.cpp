@@ -127,6 +127,19 @@ std::string json_string(const std::string& text) {
 std::string path_join(const std::string& directory, const std::string& leaf) {
     return directory + "/" + leaf;
 }
+std::string absolute_path(const std::string& path) {
+#ifdef _WIN32
+    std::vector<wchar_t> buffer(32768);
+    const DWORD count = GetFullPathNameW(from_utf8(path).c_str(), static_cast<DWORD>(buffer.size()), buffer.data(), 0);
+    if (!count || count >= buffer.size()) throw std::runtime_error("Cannot resolve absolute path: " + path);
+    return to_utf8(std::wstring(buffer.data(), count));
+#else
+    if (!path.empty() && path[0] == '/') return path;
+    std::vector<char> buffer(65536);
+    if (!getcwd(buffer.data(), buffer.size())) throw std::runtime_error("Cannot read working directory");
+    return path_join(buffer.data(), path);
+#endif
+}
 static bool directory_exists(const std::string& path) {
 #ifdef _WIN32
     const DWORD a = GetFileAttributesW(from_utf8(path).c_str());

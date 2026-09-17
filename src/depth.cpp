@@ -117,7 +117,7 @@ void DepthWriter::write(const DepthFrame& frame) {
         epoch_segment_base_ = files_.back().segment + 1;
     }
     if (!frames_) first_time_ = frame.relative_time_100ns;
-    const bool gap = reset || (frames_ && frame.relative_time_100ns - previous_time_ > 500000);
+    const bool gap = reset || (frames_ && !frame.pause_boundary && frame.relative_time_100ns - previous_time_ > 500000);
     append(std::shared_ptr<DepthFrame>(new DepthFrame(frame)),
         epoch_segment_base_ + static_cast<std::uint64_t>(frame.relative_time_100ns - first_time_) / (10000000ULL * segment_seconds_));
     previous_time_ = frame.relative_time_100ns;
@@ -142,7 +142,8 @@ void DepthWriter::append(std::shared_ptr<DepthFrame> frame, std::uint64_t segmen
              << "\",\"source_frame\":\"" << frame->index << "\",\"timestamp_epoch\":\"" << timestamp_epoch_
              << "\",\"receipt_ticks\":\"" << frame->receipt_ticks
              << "\",\"sensor_delta_100ns\":\"" << delta
-             << "\",\"gap_before\":" << (frames_ && (delta <= 0 || delta > 500000) ? "true" : "false")
+             << "\",\"gap_before\":" << (frames_ && (delta <= 0 || (!frame->pause_boundary && delta > 500000)) ? "true" : "false")
+             << ",\"pause_boundary\":" << (frame->pause_boundary ? "true" : "false")
              << ",\"min_reliable_mm\":" << frame->min_reliable_mm
              << ",\"max_reliable_mm\":" << frame->max_reliable_mm << "}\n";
     } else {

@@ -5,7 +5,7 @@ This document describes implemented behavior. The [product specification](specif
 ## Available components
 
 - `recording_tool`: record audio or enumerate Windows capture endpoints.
-- `audio_recorder`: optional Dear ImGui/GLFW interface with source selection, Record/Stop, meters, timecode, take path, current-session history, and simulated depth preview.
+- `audio_recorder`: Dear ImGui/GLFW interface following the supplied mockup, with French transport controls, RGB depth view, vertical meters, live gain and persistent INI preferences.
 - `recorder_core`: portable source interface, deterministic simulator, bounded packet queue, background file writer, float32 WAV serialization, and recording state/control.
 - `WasapiSource`: Windows shared-mode, event-driven capture using native Windows SDK APIs. COM objects are created, used, and released on the capture thread.
 
@@ -17,11 +17,21 @@ The recorder accepts another `AudioSource` implementation through the same inter
 
 ## Elapsed timecode display
 
-The GUI has a large, fixed header showing `HH:MM:SS:FF` at **30/1 fps, non-drop**, matching the default planned proxy rate. The display is derived from stored audio sample frames at the actual sample rate, rounded down to the current timecode frame using integer arithmetic. It does not advance when no audio is written, retains the final duration after Stop/finalization, and resets to zero when a new recording starts. It stays visible while the controls and take history scroll. Hours continue past 24 for long takes.
+The GUI has a large, fixed header showing `HH:MM:SS:FF` at **30/1 fps, non-drop**, matching the default planned proxy rate. The display is derived from stored audio sample frames at the actual sample rate, rounded down to the current timecode frame using integer arithmetic. It does not advance when no audio is written, retains the final duration after Stop/finalization, and resets to zero when a new recording starts. It stays visible while settings or take history are open. Hours continue past 24 for long takes.
 
 This is an elapsed-duration display in SMPTE-style notation, not embedded source timecode or an external clock synchronization feature. It does not change recording timestamps or the archive format; interrupted takes still require inspection of their timing journals.
 
-## Simulation
+## GUI controls and configuration
+
+`Gain` applies -24..+36 dB to every audio channel before queueing to disk. Live changes ramp linearly over the beginning of the next packet, up to 10 ms. The float32 writer does not hard-clip values above full scale: the meter lights red and `audio_overload` is a warning, including in strict mode. `--gain-db` selects the initial CLI gain. The manifest records the initial gain, and every audio journal fragment records the target dB, start/end linear multipliers and ramp length. Packet offsets identify the correct portion of a ramp across file rotation.
+
+Pause keeps acquisition running and discards packets/images until resume. Both queues drain normally, the stored-sample timecode freezes, and Stop works during pause. `pause`/`resume` events retain host ticks and captured-audio frame positions. The first resumed audio/depth item carries `pause_boundary`; intentional gaps do not count as device discontinuities. Native clock resets still do. Kinect timestamps remain native, and its RGB preview retains the elapsed pause as a held image. Simulated depth continues on the stored-audio clock.
+
+The GUI loads `recorder.ini` beside its executable, or an explicit `--config` file. UTF-8 quoted strings support backslashes, quotes and line escapes; unknown keys survive a rewrite, while comments are regenerated. Invalid individual values are reported and retain defaults. Writes use the existing atomic metadata writer, are debounced by 600 ms, and flush on close. Relative paths resolve against the INI directory. Audio selection stores an endpoint ID, never an enumeration index; a missing endpoint is not silently replaced. Rebuilds install `recorder.example.ini` only, preserving the personal INI.
+
+The view preserves the 512x424 image aspect ratio and palette. Fonts come from Windows Segoe UI with an embedded ImGui fallback. Meter channels scroll horizontally above four channels. Encoding progress counts finished jobs rather than inventing an active-job estimate; free disk space is refreshed every five seconds. Lecture opens the last completed RGB preview through the Windows file association, without an embedded player.
+
+## Simulation signal
 
 Default: 48 kHz, mono, amplitude 0.25, 440 Hz base tone, plus an 80 ms 1 kHz marker each sample-clock second. Markers have 5 ms ramps. `--signal sine` produces only the base tone; the second stereo channel uses 1.5 times the base frequency. `--amplitude 0` generates silence. Simulation writes samples to the recorder and meters; it does not play sound through the speakers.
 
@@ -37,7 +47,7 @@ WASAPI provides a device sample position and a correlated QPC value in 100 ns un
 
 The initial WASAPI discontinuity flag is retained without treating startup as mid-take loss. Subsequent discontinuities or valid device-position gaps now log warnings and retain the received PCM and native positions without stopping. Timestamp-error packets retain their samples and are excluded from continuity comparisons. No packets for five seconds raises a read error; the default policy journals it, pauses briefly and retries the same source while Kinect acquisition continues. It never switches microphones. Invalid-size/non-finite packets are skipped with a warning. `--strict` restores interruption on source failures, discontinuities and queue overload.
 
-Warning events contain a code, message, occurrence count and first/last host ticks. Pending events are coalesced by code, keeping the diagnostic queue bounded. The writer owns log I/O. The UI reports the count/latest message and **Complete with warnings** after finalization; the manifest retains `state: complete` with `warnings`, `last_warning` and `capture_policy`. The CLI returns zero for warning-only takes. If microphone reads keep failing, a finite take stops after its requested wall duration is reached and the current read/retry finishes; an indefinite take remains stoppable. Initial device-open/configuration and file-write errors remain fatal. Retrying an invalidated device handle is not a guarantee of automatic reconnection.
+Warning events contain a code, message, occurrence count and first/last host ticks. Pending events are coalesced by code, keeping the diagnostic queue bounded. The writer owns log I/O. The UI reports warnings in **Journal** and displays **TERMINÉ AVEC ALERTES** after finalization; the manifest retains `state: complete` with `warnings`, `last_warning` and `capture_policy`. The CLI returns zero for warning-only takes. If microphone reads keep failing, a finite take stops after its requested wall duration is reached and the current read/retry finishes; an indefinite take remains stoppable. Initial device-open/configuration and file-write errors remain fatal. Retrying an invalidated device handle is not a guarantee of automatic reconnection.
 
 ## File contract
 
@@ -80,6 +90,8 @@ The multichannel fixture covers 4-channel/16 kHz, 8-channel/44.1 kHz and 32-chan
 On 17 September 2026, a real 45-second capture with Kinect microphone enhancements disabled produced 720,000 sample frames at 16 kHz across four channels, plus 1,350 native depth frames, with zero warnings, invalid audio timestamps or depth gaps. FFmpeg decoded the four-channel WAV byte for byte. The WASAPI GUI smoke test also completed with four meters and both background exports successful. This checks one device/session, not long-duration endurance across all supported formats.
 
 `audio_recorder --smoke-test NEW_DIRECTORY` creates a hidden window, records 250 ms of simulation through the GUI's recorder path, finalizes it, and saves an adjacent PPM framebuffer capture. This tests renderer/recorder integration without a visible desktop window or a microphone. Normal operation omits this argument.
+
+`--controls-smoke-test NEW_DIRECTORY` drives the actual mouse widgets for Record, Gain, Pause, Resume and Stop, with recording/paused framebuffer captures. The GUI integration test restarts with the saved INI, checks the applied gain and source options, verifies UTF-8 paths, and confirms that a missing remembered microphone is not replaced. Core tests check the gained samples on all four channels, pause exclusion of both media streams, intentional native depth gaps, overload without hard clipping and Stop while paused.
 
 Local validation used Visual Studio 2022/MSVC x64 on Windows: both CTest suites passed, the hidden-window GUI smoke test completed, and a 65-second stereo simulation produced exactly 3,120,000 sample frames with 60-second/5-second WAV rotation. FFprobe recognized the format as `pcm_f32le`, and FFmpeg decoded the generated audio. This accelerated run verifies file generation/rotation, not 65 seconds of real-time hardware endurance.
 

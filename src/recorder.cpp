@@ -55,10 +55,14 @@ public:
         } else { ++it->second.count; it->second.last_ticks = now; it->second.message = message; }
         changed_.notify_one();
     }
-    bool pop(AudioPacket& p, std::shared_ptr<DepthFrame>& depth, std::vector<CaptureWarning>& warnings) {
+    void event(const std::string& json) {
+        std::lock_guard<std::mutex> lock(mutex_); events_.push_back(json); changed_.notify_one();
+    }
+    bool pop(AudioPacket& p, std::shared_ptr<DepthFrame>& depth, std::vector<CaptureWarning>& warnings, std::vector<std::string>& events) {
         std::unique_lock<std::mutex> lock(mutex_);
-        changed_.wait(lock, [this] { return size_ || !depth_.empty() || !warnings_.empty() || done_ || aborted_; });
-        if (aborted_ || (!size_ && depth_.empty() && warnings_.empty())) return false;
+        changed_.wait(lock, [this] { return size_ || !depth_.empty() || !warnings_.empty() || !events_.empty() || done_ || aborted_; });
+        if (aborted_ || (!size_ && depth_.empty() && warnings_.empty() && events_.empty())) return false;
+        events.clear(); events.swap(events_);
         warnings.clear();
         for (std::map<std::string, CaptureWarning>::const_iterator it = warnings_.begin(); it != warnings_.end(); ++it)
             warnings.push_back(it->second);
@@ -79,6 +83,7 @@ private:
     std::vector<AudioPacket> packets_;
     std::deque<std::shared_ptr<DepthFrame> > depth_;
     std::map<std::string, CaptureWarning> warnings_; // Coalesce pending warnings by fixed event code.
+    std::vector<std::string> events_;
     std::size_t head_, tail_, size_;
     bool done_, aborted_;
     std::mutex mutex_;
@@ -111,6 +116,7 @@ public:
     std::shared_ptr<const DepthFrame> depth_preview() const { return depth_ ? depth_->latest() : std::shared_ptr<const DepthFrame>(); }
     std::uint64_t warnings() const { return warnings_; }
     std::string last_warning() const { return last_warning_; }
+    void event(const std::string& json) { write_text(events_, json + "\n"); }
     void warn(const CaptureWarning& warning) {
         warnings_ += warning.count; last_warning_ = warning.message;
         std::ostringstream event;
@@ -148,12 +154,16 @@ public:
             files_.back().count += n; frames_ += n;
             std::ostringstream line;
             line.imbue(std::locale::classic());
+            line << std::setprecision(17);
             line << "{\"packet\":" << packets_ << ",\"file\":" << json_string(files_.back().path)
                  << ",\"file_frame\":" << file_offset << ",\"frames\":" << n
                  << ",\"packet_offset_frames\":" << offset << ",\"packet_frames\":" << packet_frames
                  << ",\"device_frame\":\"" << packet.device_frame << "\",\"timestamp_100ns\":\"" << packet.timestamp_100ns
                  << "\",\"receipt_ticks\":\"" << packet.receipt_ticks << "\",\"flags\":" << packet.flags
-                 << ",\"timestamp_valid\":" << ((packet.flags & TimestampError) ? "false" : "true") << "}\n";
+                 << ",\"timestamp_valid\":" << ((packet.flags & TimestampError) ? "false" : "true")
+                 << ",\"gain_db\":" << packet.gain_db << ",\"gain_start_linear\":" << packet.gain_start
+                 << ",\"gain_end_linear\":" << packet.gain_end << ",\"gain_ramp_frames\":" << packet.gain_ramp_frames
+                 << ",\"pause_boundary\":" << (packet.pause_boundary ? "true" : "false") << "}\n";
             write_text(timing_, line.str());
             offset += n;
         }
@@ -227,6 +237,7 @@ private:
           << ",\n  \"capture_policy\": " << json_string(options_.strict_capture ? "strict" : "continue-with-warnings")
           << ",\n  \"warnings\": " << warnings_ << ",\n  \"last_warning\": " << json_string(last_warning_)
           << ",\n  \"source\": " << json_string(options_.source) << ",\n  \"source_name\": " << json_string(source_name_)
+          << ",\n  \"session\": " << json_string(options_.session_name)
           << ",\n  \"device_id\": " << json_string(device_id_)
           << ",\n  \"clock\": " << json_string(options_.source == "simulate" ? (options_.fast ? "synthetic-unpaced" : "synthetic-realtime") : "wasapi-qpc")
           << ",\n  \"host_clock_frequency\": \"" << clock_frequency() << "\",\n  \"origin_100ns\": \"" << origin_
@@ -237,6 +248,8 @@ private:
           << ",\n  \"stored_duration_seconds\": " << static_cast<double>(frames_) / format_.sample_rate
           << ",\n  \"requested_duration_seconds\": " << options_.duration_seconds
           << ",\n  \"segment_seconds\": " << options_.segment_seconds
+          << ",\n  \"audio_gain\": {\"initial_db\":" << options_.gain_db
+          << ",\"applied_to_samples\":true,\"changes\":\"timing/audio-packets.jsonl\",\"hard_clipped\":false}"
           << ",\n  \"simulation\": {\"signal\": " << json_string(options_.signal) << ", \"frequency\": " << options_.frequency
           << ", \"amplitude\": " << options_.amplitude << "},\n  \"audio_files\": [";
         for (std::size_t i = 0; i < files_.size(); ++i) {
@@ -268,8 +281,8 @@ private:
 };
 }
 
-RecorderStatus::RecorderStatus() : state("Idle"), frames(0), packets(0), timestamp_errors(0), depth_frames(0), depth_gap_intervals(0), warnings(0), peak(1, 0), rms(1, 0), active(false) {}
-Recorder::Recorder(EncodingQueue::Executor encoder) : stop_(false), encodings_(encoder) {}
+RecorderStatus::RecorderStatus() : state("Idle"), frames(0), packets(0), timestamp_errors(0), depth_frames(0), depth_gap_intervals(0), warnings(0), peak(1, 0), rms(1, 0), active(false), paused(false), gain_db(0) {}
+Recorder::Recorder(EncodingQueue::Executor encoder) : stop_(false), paused_(false), gain_db_(0), encodings_(encoder) {}
 bool Recorder::export_preview(const std::string& take) {
     if (take.empty()) throw std::invalid_argument("Choose a take folder to export");
     EncodingJob job; job.preview_take = take; job.output = path_join(take, "video/preview-rgb.mkv");
@@ -279,15 +292,25 @@ bool Recorder::export_preview(const std::string& take) {
 Recorder::~Recorder() { request_stop(); wait(); }
 RecorderStatus Recorder::status() const { std::lock_guard<std::mutex> lock(mutex_); return status_; }
 void Recorder::request_stop() { stop_ = true; }
+void Recorder::set_gain_db(double gain) {
+    if (!std::isfinite(gain) || gain < -24 || gain > 36) throw std::invalid_argument("Audio gain must be -24..+36 dB");
+    gain_db_ = gain;
+    std::lock_guard<std::mutex> lock(mutex_); status_.gain_db = gain;
+}
+void Recorder::set_paused(bool paused) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!status_.active || (status_.state != "Recording" && status_.state != "Paused")) return;
+    paused_ = paused; status_.paused = paused; status_.state = paused ? "Paused" : "Recording";
+}
 void Recorder::wait() { if (thread_.joinable()) thread_.join(); }
 void Recorder::start(const RecordOptions& options, std::unique_ptr<AudioSource> source, std::unique_ptr<DepthSource> depth) {
     validate_options(options);
     if (status().active) throw std::runtime_error("A recording is already active");
-    wait(); stop_ = false;
+    wait(); stop_ = false; paused_ = false; gain_db_ = options.gain_db;
     RecordOptions resolved = options;
     if (resolved.timestamped_output) resolved.output = timestamped_take_path(options.output);
     { std::lock_guard<std::mutex> lock(mutex_); status_ = RecorderStatus(); status_.active = true;
-      status_.state = "Preparing"; status_.output = resolved.output; }
+      status_.state = "Preparing"; status_.output = resolved.output; status_.gain_db = options.gain_db; }
     try { thread_ = std::thread(&Recorder::run, this, resolved, std::move(source), std::move(depth)); }
     catch (...) { std::lock_guard<std::mutex> lock(mutex_); status_.active = false; status_.state = "Interrupted"; throw; }
 }
@@ -335,6 +358,7 @@ void Recorder::run(RecordOptions options, std::unique_ptr<AudioSource> source, s
                     opened = true;
                     while (!depth_begin && !stop_) std::this_thread::sleep_for(std::chrono::milliseconds(1));
                     DepthFrame frame;
+                    bool depth_paused = false;
                     while (!stop_) {
                         try {
                             if (!depth->read(frame, stop_)) {
@@ -347,6 +371,8 @@ void Recorder::run(RecordOptions options, std::unique_ptr<AudioSource> source, s
                             if (options.strict_capture) throw;
                             queue->warn("depth_read", e.what()); retry_pause(stop_); continue;
                         }
+                        if (paused_) { depth_paused = true; continue; }
+                        frame.pause_boundary = depth_paused; depth_paused = false;
                         if (!queue->push_depth(frame, stop_)) {
                             if (stop_) break;
                             if (options.strict_capture) throw std::runtime_error("Depth writer queue full");
@@ -368,7 +394,9 @@ void Recorder::run(RecordOptions options, std::unique_ptr<AudioSource> source, s
                 AudioPacket pending; pending.samples.reserve(packet_samples);
                 std::shared_ptr<DepthFrame> pending_depth;
                 std::vector<CaptureWarning> warnings;
-                while (queue->pop(pending, pending_depth, warnings)) {
+                std::vector<std::string> events;
+                while (queue->pop(pending, pending_depth, warnings, events)) {
+                    for (const auto& event : events) writer->event(event);
                     for (std::size_t i = 0; i < warnings.size(); ++i) writer->warn(warnings[i]);
                     if (pending_depth) writer->write_depth(*pending_depth);
                     else if (!pending.samples.empty()) writer->write(pending);
@@ -388,11 +416,23 @@ void Recorder::run(RecordOptions options, std::unique_ptr<AudioSource> source, s
             static_cast<std::uint64_t>(std::llround(options.duration_seconds * format.sample_rate)) : 0;
         std::uint64_t captured = 0, expected_device_frame = 0;
         bool previous_valid = false, audio_failed = false;
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(
             static_cast<std::int64_t>(options.duration_seconds * 1000));
+        bool audio_paused = false, resume_boundary = false, overloading = false;
+        auto pause_began = std::chrono::steady_clock::now();
+        double previous_gain = std::pow(10.0, options.gain_db / 20.0);
         while (!stop_ && (!limit || captured < limit)) {
+            const bool pause_now = paused_;
+            if (pause_now != audio_paused) {
+                const auto now = std::chrono::steady_clock::now();
+                if (pause_now) pause_began = now;
+                else { deadline += now - pause_began; previous_valid = false; resume_boundary = true; }
+                queue->event("{\"type\":\"" + std::string(pause_now ? "pause" : "resume") +
+                    "\",\"host_ticks\":\"" + std::to_string(clock_ticks()) + "\",\"captured_audio_frame\":" + std::to_string(captured) + "}");
+                audio_paused = pause_now;
+            }
             // An absent microphone must not make a finite diagnostic take run forever.
-            if (audio_failed && limit && std::chrono::steady_clock::now() >= deadline) break;
+            if (!audio_paused && audio_failed && limit && std::chrono::steady_clock::now() >= deadline) break;
             try {
                 if (!source->read(packet, stop_)) {
                     if (stop_) break;
@@ -406,20 +446,39 @@ void Recorder::run(RecordOptions options, std::unique_ptr<AudioSource> source, s
                 if (options.strict_capture) throw;
                 queue->warn("audio_read", e.what()); audio_failed = true; retry_pause(stop_); continue;
             }
+            if (audio_paused) { if (options.fast) std::this_thread::sleep_for(std::chrono::milliseconds(1)); continue; }
             std::uint64_t count = packet.samples.size() / format.channels;
             if (limit && count > limit - captured) { count = limit - captured; packet.samples.resize(static_cast<std::size_t>(count) * format.channels); }
             const bool valid = !(packet.flags & TimestampError);
-            const bool gap = captured && ((packet.flags & Discontinuity) || (valid && previous_valid && packet.device_frame != expected_device_frame));
+            packet.pause_boundary = resume_boundary; resume_boundary = false;
+            const bool gap = captured && !packet.pause_boundary && ((packet.flags & Discontinuity) || (valid && previous_valid && packet.device_frame != expected_device_frame));
             if (gap) packet.flags |= Discontinuity;
             if (gap && !options.strict_capture) queue->warn("audio_discontinuity", "Audio discontinuity; captured samples and native timing retained");
             if (!valid) queue->warn("audio_timestamp", "Audio timestamp marked invalid by the device; samples retained");
             expected_device_frame = packet.device_frame + count; previous_valid = valid;
+            packet.gain_db = gain_db_;
+            const double target_gain = std::pow(10.0, packet.gain_db / 20.0);
+            packet.gain_start = previous_gain; packet.gain_end = target_gain;
+            packet.gain_ramp_frames = previous_gain == target_gain ? 0 : static_cast<unsigned>(std::min(count, static_cast<std::uint64_t>(std::max(1U, format.sample_rate / 100))));
+            for (std::uint64_t f = 0; f < count; ++f) {
+                const double gain = f < packet.gain_ramp_frames ? previous_gain +
+                    (target_gain - previous_gain) * (f + 1) / packet.gain_ramp_frames : target_gain;
+                if (gain != 1) for (unsigned c = 0; c < format.channels; ++c) {
+                    float& v = packet.samples[static_cast<std::size_t>(f) * format.channels + c];
+                    v = static_cast<float>(v * gain);
+                    if (!std::isfinite(v)) throw std::runtime_error("Audio gain overflow");
+                }
+            }
+            previous_gain = target_gain;
             float peak[MaxAudioChannels] = {}; double power[MaxAudioChannels] = {};
             for (std::size_t i = 0; i < packet.samples.size(); ++i) {
                 const float v = packet.samples[i];
                 const unsigned c = static_cast<unsigned>(i % format.channels);
                 peak[c] = std::max(peak[c], std::abs(v)); power[c] += static_cast<double>(v) * v;
             }
+            const bool overload = *std::max_element(peak, peak + format.channels) >= 1;
+            if (overload && !overloading) queue->warn("audio_overload", "Audio exceeds 0 dBFS after gain; reduce gain. Float32 samples retain headroom.");
+            overloading = overload;
             if (!queue->push(packet, options.fast, stop_)) {
                 if (stop_) break;
                 if (options.strict_capture) { error = "Audio writer queue full"; break; }
@@ -461,6 +520,6 @@ void Recorder::run(RecordOptions options, std::unique_ptr<AudioSource> source, s
           status_.depth_frames = writer->depth_frames(); status_.depth_preview = writer->depth_preview(); }
       if (writer) status_.depth_gap_intervals = writer->depth_gap_intervals();
       if (writer) { status_.warnings = writer->warnings(); status_.last_warning = writer->last_warning(); }
-      status_.error = error; status_.state = error.empty() ? (status_.warnings ? "Complete with warnings" : "Complete") : "Interrupted"; status_.active = false; }
+      status_.error = error; status_.state = error.empty() ? (status_.warnings ? "Complete with warnings" : "Complete") : "Interrupted"; status_.active = false; status_.paused = false; }
 }
 }

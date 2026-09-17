@@ -3,9 +3,13 @@
 /build/
 /recordings/
 /release/recordings/
+/release/recorder.ini
+/release/recorder.ini.tmp
 /test-stop-*/
 /test-fault-*/
 /test-kinect-*/
 /test-encoding-*/
+/test-controls-*/
+/test-settings-*/
 __pycache__/
 *.user

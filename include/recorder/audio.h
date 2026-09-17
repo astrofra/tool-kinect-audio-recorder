@@ -22,19 +22,25 @@ struct AudioPacket {
     std::uint64_t timestamp_100ns;
     std::uint64_t receipt_ticks;
     unsigned flags;
-    AudioPacket() : device_frame(0), timestamp_100ns(0), receipt_ticks(0), flags(0) {}
+    double gain_db, gain_start, gain_end;
+    unsigned gain_ramp_frames;
+    bool pause_boundary;
+    AudioPacket() : device_frame(0), timestamp_100ns(0), receipt_ticks(0), flags(0),
+        gain_db(0), gain_start(1), gain_end(1), gain_ramp_frames(0), pause_boundary(false) {}
 };
 
 struct RecordOptions {
     std::string output;
     std::string source;
     std::string device_id;
+    std::string session_name;
     std::string signal;
     std::string depth_pattern; // off, gradient, noise or kinect (Microsoft SDK 2.0).
     unsigned sample_rate;
     unsigned channels;
     double frequency;
     double amplitude;
+    double gain_db; // Software gain before WAV storage and metering, -24..+36 dB.
     double duration_seconds; // Zero means until Stop.
     unsigned segment_seconds;
     bool fast;

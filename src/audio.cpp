@@ -8,7 +8,7 @@
 
 namespace recorder {
 RecordOptions::RecordOptions() : source("simulate"), signal("markers"), depth_pattern("off"), sample_rate(48000),
-    channels(1), frequency(440.0), amplitude(0.25), duration_seconds(0), segment_seconds(60), fast(false), encode_depth(false),
+    channels(1), frequency(440.0), amplitude(0.25), gain_db(0), duration_seconds(0), segment_seconds(60), fast(false), encode_depth(false),
     encode_preview(false), strict_capture(false), timestamped_output(false) {}
 
 void validate_options(const RecordOptions& o) {
@@ -16,6 +16,8 @@ void validate_options(const RecordOptions& o) {
     if (o.source != "simulate" && o.source != "wasapi") throw std::invalid_argument("Source must be simulate or wasapi");
     if (o.sample_rate < 8000 || o.sample_rate > 192000) throw std::invalid_argument("Sample rate must be 8000..192000");
     if (o.channels < 1 || o.channels > 2) throw std::invalid_argument("Simulation supports one or two channels");
+    if (!std::isfinite(o.gain_db) || o.gain_db < -24 || o.gain_db > 36)
+        throw std::invalid_argument("Audio gain must be -24..+36 dB");
     if (o.signal != "sine" && o.signal != "markers") throw std::invalid_argument("Signal must be sine or markers");
     if (o.depth_pattern != "off" && o.depth_pattern != "gradient" && o.depth_pattern != "noise" && o.depth_pattern != "kinect")
         throw std::invalid_argument("Depth must be off, gradient, noise or kinect");

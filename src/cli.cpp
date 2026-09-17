@@ -53,6 +53,7 @@ void usage() {
         "  --strict                 Stop on acquisition errors; default logs warnings and continues\n"
         "  --duration SECONDS       Default: 10; 0 records until Ctrl+C\n"
         "  --device ID              WASAPI endpoint ID; default input if omitted\n"
+        "  --gain-db DB             Software gain before storage, -24..+36 dB (default 0)\n"
         "  --sample-rate HZ         Simulation: 8000..192000, default 48000\n"
         "  --channels 1|2           Simulation only; WASAPI uses native mix format\n"
         "  --signal markers|sine    Simulation, default markers\n"
@@ -126,6 +127,7 @@ int run(const std::vector<std::string>& args) {
         if (key == "--output") o.output = v;
         else if (key == "--source") o.source = v;
         else if (key == "--duration") o.duration_seconds = number(v);
+        else if (key == "--gain-db") o.gain_db = number(v);
         else if (key == "--device") o.device_id = v;
         else if (key == "--segment-seconds") o.segment_seconds = integer(v);
         else if (key == "--depth") o.depth_pattern = v;
