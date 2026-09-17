@@ -2,8 +2,8 @@
 
 Implemented in C++11, with no new recording-time dependency. The GUI can record
 a simulated depth raster alongside simulated or WASAPI audio. Actual Kinect USB
-capture, camera calibration, point-cloud rendering and browser playback remain
-future work. This milestone needs no Kinect driver.
+capture is now available through the separate [Microsoft SDK backend](kinect-implementation.md).
+Point-cloud rendering and browser playback remain future work. This simulation milestone needs no Kinect driver.
 
 ## Depth is an image of distances
 
@@ -269,5 +269,5 @@ partial segment and verify that a missing encoder leaves capture complete.
 
 The hidden-window GUI smoke test now records both streams and captures the depth
 preview alongside the timecode. Local visual inspection confirmed the preview.
-Physical Kinect capture, float conversion, device drift, GPU encoding, web
-decoding and non-Windows execution remain unqualified.
+Physical Kinect capture has separate [implementation and validation notes](kinect-implementation.md).
+Float conversion, device drift, GPU encoding, web decoding and non-Windows execution remain unqualified.

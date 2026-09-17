@@ -38,6 +38,7 @@ unsigned integer(const std::string& text) {
 void usage() {
     std::cout << "Depth + audio recorder (C++11)\n\n"
         "  recording_tool devices\n"
+        "  recording_tool kinect-info    Probe sensor and read one depth frame\n"
         "  recording_tool record [options]\n\n"
         "  recording_tool export-depth --input SEGMENT.kd16 --output VIDEO.mkv\n"
         "      [--audio MATCHING_SEGMENT.wav] [--ffmpeg PATH]\n"
@@ -52,7 +53,8 @@ void usage() {
         "  --signal markers|sine    Simulation, default markers\n"
         "  --frequency HZ           Simulation base tone, default 440\n"
         "  --amplitude 0..1         Simulation peak scale, default 0.25\n"
-        "  --depth off|gradient|noise Simulated 512x424 uint16 depth at 30 Hz (default off)\n"
+        "  --depth off|gradient|noise|kinect 512x424 uint16 depth (default off)\n"
+        "      kinect: Microsoft Kinect v2 SDK 2.0, native timestamps, real-time only\n"
         "  --segment-seconds N      Audio/depth rotation interval, default 60\n"
         "  --encode-depth           Queue finalized depth + audio as video/*.mkv\n"
         "  --ffmpeg PATH            Encoder override for --encode-depth\n"
@@ -65,6 +67,19 @@ int run(const std::vector<std::string>& args) {
         const std::vector<recorder::AudioDevice> devices = recorder::enumerate_audio_devices();
         if (devices.empty()) std::cout << "No active microphone endpoints. Simulation needs no audio hardware.\n";
         for (std::size_t i = 0; i < devices.size(); ++i) std::cout << devices[i].name << "\n  " << devices[i].id << '\n';
+        return 0;
+    }
+    if (args[1] == "kinect-info") {
+        if (args.size() != 2) throw std::invalid_argument("kinect-info takes no arguments");
+        std::unique_ptr<recorder::DepthSource> depth = recorder::make_kinect_depth_source();
+        std::atomic<bool> stop(false);
+        depth->open(stop);
+        recorder::DepthFrame frame;
+        if (!depth->read(frame, stop)) throw std::runtime_error("Kinect returned no depth frame");
+        std::cout << "Kinect v2: " << depth->device_id() << "\n512x424 uint16 millimetres\n"
+                  << "RelativeTime (100 ns): " << frame.relative_time_100ns
+                  << "\nReliable range (mm): " << frame.min_reliable_mm << ".." << frame.max_reliable_mm
+                  << "\nCalibration: " << depth->calibration_json() << '\n';
         return 0;
     }
     if (args[1] == "export-depth") {
@@ -134,7 +149,7 @@ int run(const std::vector<std::string>& args) {
     std::cout << s.state << ": " << s.frames << " sample frames, " << s.format.channels << " channel(s), "
               << s.format.sample_rate << " Hz, " << std::fixed << std::setprecision(3)
               << static_cast<double>(s.frames) / s.format.sample_rate << " seconds\n";
-    if (o.depth_pattern != "off") std::cout << s.depth_frames << " depth frames (512x424, 30 Hz, uint16 millimetres)\n";
+    if (o.depth_pattern != "off") std::cout << s.depth_frames << " depth frames (512x424, nominal 30 Hz, uint16 millimetres), " << s.depth_gap_intervals << " gap intervals\n";
     if (o.encode_depth) {
         std::cout << "Capture finalized; draining background encodings...\n" << std::flush;
         recorder.wait_for_encodings();

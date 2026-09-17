@@ -29,7 +29,7 @@ struct RecordOptions {
     std::string source;
     std::string device_id;
     std::string signal;
-    std::string depth_pattern; // off, gradient or noise (synthetic, audio-clock driven).
+    std::string depth_pattern; // off, gradient, noise or kinect (Microsoft SDK 2.0).
     unsigned sample_rate;
     unsigned channels;
     double frequency;

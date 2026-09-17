@@ -2,6 +2,8 @@
 
 Version: **0.2 proposal**. Date: **16 September 2026**.
 
+Implementation update, 17 September: physical depth acquisition now uses [Microsoft Kinect SDK 2.0](kinect-implementation.md). References below to `sensor_freenect2` describe the earlier proposal; the current backend is `kinect_depth_source`. The full playback/export and calibrated synchronization requirements remain targets.
+
 This document specifies a Windows tool for recording interviews as depth-based point clouds with external microphone audio, and exporting them for on-demand browser playback. Technology rationale is in the [feasibility study](feasibility.md); timing and storage semantics are in [synchronization and recording format](synchronization-and-format.md).
 
 “Must” identifies an initial release requirement. Numeric performance thresholds are proposed acceptance targets that require hardware validation.

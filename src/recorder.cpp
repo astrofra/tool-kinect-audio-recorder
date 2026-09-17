@@ -5,6 +5,8 @@
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <deque>
+#include <future>
 #include <iomanip>
 #include <locale>
 #include <sstream>
@@ -28,10 +30,20 @@ public:
         changed_.notify_one();
         return true;
     }
-    bool pop(AudioPacket& p) {
+    bool push_depth(const DepthFrame& frame, const std::atomic<bool>& stop) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        // Two seconds of native depth, independent of the audio queue capacity.
+        if (depth_.size() >= 60 || aborted_ || stop) return false;
+        depth_.push_back(std::shared_ptr<DepthFrame>(new DepthFrame(frame)));
+        changed_.notify_one();
+        return true;
+    }
+    bool pop(AudioPacket& p, std::shared_ptr<DepthFrame>& depth) {
         std::unique_lock<std::mutex> lock(mutex_);
-        changed_.wait(lock, [this] { return size_ || done_ || aborted_; });
-        if (!size_ || aborted_) return false;
+        changed_.wait(lock, [this] { return size_ || !depth_.empty() || done_ || aborted_; });
+        if (aborted_ || (!size_ && depth_.empty())) return false;
+        depth.reset();
+        if (!depth_.empty()) { depth = depth_.front(); depth_.pop_front(); return true; }
         p = packets_[head_]; head_ = (head_ + 1) % packets_.size(); --size_;
         changed_.notify_one();
         return true;
@@ -40,6 +52,7 @@ public:
     void abort() { std::lock_guard<std::mutex> lock(mutex_); aborted_ = true; changed_.notify_all(); }
 private:
     std::vector<AudioPacket> packets_;
+    std::deque<std::shared_ptr<DepthFrame> > depth_;
     std::size_t head_, tail_, size_;
     bool done_, aborted_;
     std::mutex mutex_;
@@ -49,14 +62,15 @@ private:
 struct AudioFile { std::string path; std::uint64_t start, count; };
 class SessionWriter {
 public:
-    SessionWriter(const RecordOptions& o, AudioFormat f, const AudioSource& source, std::uint64_t origin, EncodingQueue& encodings)
+    SessionWriter(const RecordOptions& o, AudioFormat f, const AudioSource& source, std::uint64_t origin, EncodingQueue& encodings,
+        const std::string& depth_id, const std::string& calibration)
         : options_(o), format_(f), source_name_(source.name()), device_id_(source.device_id()),
           origin_(origin), frames_(0), packets_(0), timestamp_errors_(0), checkpoint_frames_(0),
           timing_(0), events_(0), created_(utc_now()), encodings_(encodings), finalized_audio_(0), submitted_(0) {
         create_new_directory(o.output);
         create_directories(path_join(o.output, "audio"));
         create_directories(path_join(o.output, "timing"));
-        if (o.depth_pattern != "off") depth_.reset(new DepthWriter(o.output, o.depth_pattern, f.sample_rate, o.segment_seconds));
+        if (o.depth_pattern != "off") depth_.reset(new DepthWriter(o.output, o.depth_pattern, f.sample_rate, o.segment_seconds, depth_id, calibration));
         manifest("recording", "");
         timing_ = open_file(path_join(o.output, "timing/audio-packets.jsonl"), "wb");
         try { events_ = open_file(path_join(o.output, "timing/events.jsonl"), "wb"); }
@@ -67,7 +81,9 @@ public:
     std::uint64_t packets() const { return packets_; }
     std::uint64_t timestamp_errors() const { return timestamp_errors_; }
     std::uint64_t depth_frames() const { return depth_ ? depth_->frames() : 0; }
+    std::uint64_t depth_gap_intervals() const { return depth_ ? depth_->gap_intervals() : 0; }
     std::shared_ptr<const DepthFrame> depth_preview() const { return depth_ ? depth_->latest() : std::shared_ptr<const DepthFrame>(); }
+    void write_depth(const DepthFrame& frame) { depth_->write(frame); }
     void write(const AudioPacket& packet) {
         const std::uint64_t packet_frames = packet.samples.size() / format_.channels;
         const std::uint64_t segment_frames = static_cast<std::uint64_t>(options_.segment_seconds) * format_.sample_rate;
@@ -151,8 +167,10 @@ private:
         std::ostringstream m;
         m.imbue(std::locale::classic());
         m << std::setprecision(17)
-          << "{\n  \"schema\": " << json_string(depth_ ? "kinect-depth-audio-prototype/1" : "kinect-audio-prototype/1")
-          << ",\n  \"application\": \"0.1.0\",\n  \"kind\": " << json_string(depth_ ? "simulated-depth-audio-capture" : "audio-capture")
+          << "{\n  \"schema\": " << json_string(options_.depth_pattern == "kinect" ? "kinect-depth-audio-prototype/2" :
+                depth_ ? "kinect-depth-audio-prototype/1" : "kinect-audio-prototype/1")
+          << ",\n  \"application\": \"0.1.0\",\n  \"kind\": " << json_string(options_.depth_pattern == "kinect" ?
+                "kinect-depth-audio-capture" : depth_ ? "simulated-depth-audio-capture" : "audio-capture")
           << ",\n  \"created_utc\": " << json_string(created_)
           << ",\n  \"state\": " << json_string(state) << ",\n  \"error\": " << json_string(error)
           << ",\n  \"source\": " << json_string(options_.source) << ",\n  \"source_name\": " << json_string(source_name_)
@@ -192,7 +210,7 @@ private:
 };
 }
 
-RecorderStatus::RecorderStatus() : state("Idle"), frames(0), packets(0), timestamp_errors(0), depth_frames(0), active(false) {
+RecorderStatus::RecorderStatus() : state("Idle"), frames(0), packets(0), timestamp_errors(0), depth_frames(0), depth_gap_intervals(0), active(false) {
     peak[0] = peak[1] = rms[0] = rms[1] = 0;
 }
 Recorder::Recorder(EncodingQueue::Executor encoder) : stop_(false), encodings_(encoder) {}
@@ -200,20 +218,23 @@ Recorder::~Recorder() { request_stop(); wait(); }
 RecorderStatus Recorder::status() const { std::lock_guard<std::mutex> lock(mutex_); return status_; }
 void Recorder::request_stop() { stop_ = true; }
 void Recorder::wait() { if (thread_.joinable()) thread_.join(); }
-void Recorder::start(const RecordOptions& options, std::unique_ptr<AudioSource> source) {
+void Recorder::start(const RecordOptions& options, std::unique_ptr<AudioSource> source, std::unique_ptr<DepthSource> depth) {
     validate_options(options);
     if (status().active) throw std::runtime_error("A recording is already active");
     wait(); stop_ = false;
     { std::lock_guard<std::mutex> lock(mutex_); status_ = RecorderStatus(); status_.active = true;
       status_.state = "Preparing"; status_.output = options.output; }
-    try { thread_ = std::thread(&Recorder::run, this, options, std::move(source)); }
+    try { thread_ = std::thread(&Recorder::run, this, options, std::move(source), std::move(depth)); }
     catch (...) { std::lock_guard<std::mutex> lock(mutex_); status_.active = false; status_.state = "Interrupted"; throw; }
 }
-void Recorder::run(RecordOptions options, std::unique_ptr<AudioSource> source) {
-    std::string error, writer_error;
+void Recorder::run(RecordOptions options, std::unique_ptr<AudioSource> source, std::unique_ptr<DepthSource> depth) {
+    std::string error, writer_error, depth_error;
     std::unique_ptr<SessionWriter> writer;
     std::unique_ptr<PacketQueue> queue;
     std::thread disk_thread;
+    std::thread depth_thread;
+    std::atomic<bool> depth_begin(false);
+    std::promise<std::pair<std::string, std::string> > depth_ready;
     try {
         if (!source) source = make_audio_source(options);
         const AudioFormat format = source->open();
@@ -229,22 +250,54 @@ void Recorder::run(RecordOptions options, std::unique_ptr<AudioSource> source) {
         if (static_cast<std::uint64_t>(slots) * packet_samples * sizeof(float) > 64ULL * 1024 * 1024)
             throw std::runtime_error("Audio queue would exceed 64 MiB");
         queue.reset(new PacketQueue(slots, packet_samples));
+        std::pair<std::string, std::string> depth_info("", "null");
+        if (options.depth_pattern == "kinect") {
+            std::future<std::pair<std::string, std::string> > ready = depth_ready.get_future();
+            depth_thread = std::thread([&] {
+                bool opened = false;
+                try {
+                    if (!depth) depth = make_kinect_depth_source();
+                    depth->open(stop_);
+                    if (stop_) throw std::runtime_error("Stopped while preparing Kinect");
+                    depth_ready.set_value(std::make_pair(depth->device_id(), depth->calibration_json()));
+                    opened = true;
+                    while (!depth_begin && !stop_) std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    DepthFrame frame;
+                    while (!stop_ && depth->read(frame, stop_)) {
+                        if (!queue->push_depth(frame, stop_)) {
+                            if (!stop_) throw std::runtime_error("Depth writer queue full; capture stopped without silently dropping frames");
+                            break;
+                        }
+                    }
+                    if (!stop_) throw std::runtime_error("Kinect depth stream ended unexpectedly");
+                } catch (const std::exception& e) {
+                    depth_error = e.what(); stop_ = true;
+                    if (!opened) depth_ready.set_exception(std::current_exception());
+                }
+                depth.reset(); // Release SDK/COM resources on their acquisition thread.
+            });
+            depth_info = ready.get();
+        }
         AudioPacket packet; packet.samples.reserve(packet_samples);
-        writer.reset(new SessionWriter(options, format, *source, clock_100ns(), encodings_));
+        writer.reset(new SessionWriter(options, format, *source, clock_100ns(), encodings_, depth_info.first, depth_info.second));
         { std::lock_guard<std::mutex> lock(mutex_); status_.format = format; status_.source_name = source->name(); }
         disk_thread = std::thread([&, packet_samples] {
             try {
                 AudioPacket pending; pending.samples.reserve(packet_samples);
-                while (queue->pop(pending)) {
-                    writer->write(pending);
+                std::shared_ptr<DepthFrame> pending_depth;
+                while (queue->pop(pending, pending_depth)) {
+                    if (pending_depth) writer->write_depth(*pending_depth);
+                    else writer->write(pending);
                     std::lock_guard<std::mutex> lock(mutex_);
                     status_.frames = writer->frames(); status_.packets = writer->packets();
                     status_.timestamp_errors = writer->timestamp_errors();
                     status_.depth_frames = writer->depth_frames(); status_.depth_preview = writer->depth_preview();
+                    status_.depth_gap_intervals = writer->depth_gap_intervals();
                 }
             } catch (const std::exception& e) { writer_error = e.what(); stop_ = true; queue->abort(); }
         });
         source->start();
+        depth_begin = true;
         { std::lock_guard<std::mutex> lock(mutex_); status_.state = "Recording"; }
         const std::uint64_t limit = options.duration_seconds > 0 ?
             static_cast<std::uint64_t>(std::llround(options.duration_seconds * format.sample_rate)) : 0;
@@ -277,15 +330,21 @@ void Recorder::run(RecordOptions options, std::unique_ptr<AudioSource> source) {
         }
         if (!captured && error.empty()) error = "Stopped before any audio was captured";
     } catch (const std::exception& e) { error = e.what(); }
+    stop_ = true;
+    if (depth_thread.joinable()) depth_thread.join();
+    if (!depth_error.empty()) error = depth_error;
     { std::lock_guard<std::mutex> lock(mutex_); status_.state = "Finalizing"; }
     if (source) { try { source->stop(); } catch (const std::exception& e) { if (error.empty()) error = e.what(); } }
     if (queue) queue->finish();
     if (disk_thread.joinable()) disk_thread.join();
     if (!writer_error.empty()) error = writer_error;
+    if (writer && options.depth_pattern == "kinect" && !writer->depth_frames() && error.empty())
+        error = "Stopped before any Kinect depth frame was captured";
     if (writer) { try { writer->finish(error, writer_error.empty()); } catch (const std::exception& e) { error += (error.empty() ? "" : "; ") + std::string(e.what()); } }
     { std::lock_guard<std::mutex> lock(mutex_);
       if (writer) { status_.frames = writer->frames(); status_.packets = writer->packets(); status_.timestamp_errors = writer->timestamp_errors();
           status_.depth_frames = writer->depth_frames(); status_.depth_preview = writer->depth_preview(); }
+      if (writer) status_.depth_gap_intervals = writer->depth_gap_intervals();
       status_.error = error; status_.state = error.empty() ? "Complete" : "Interrupted"; status_.active = false; }
 }
 }

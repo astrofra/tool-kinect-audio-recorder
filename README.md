@@ -1,6 +1,6 @@
 # Kinect Audio Recorder
 
-A Windows interview recorder with audio capture and hardware-free audio/depth simulation. The capture core, simulators, file writers, and CLI use **C++11** and CMake. The desktop interface uses **Dear ImGui + GLFW**. Physical Kinect capture and the XML editing workflow are specified but not implemented yet.
+A Windows interview recorder with Kinect v2 depth capture, WASAPI audio and hardware-free audio/depth simulation. The capture core, simulators, file writers, and CLI use **C++11** and CMake. The desktop interface uses **Dear ImGui + GLFW**. Playback, synchronization fitting and the XML editing workflow remain future work.
 
 ## Build on Windows
 
@@ -30,7 +30,22 @@ The GUI defaults to simulation. Choose a new take folder, press **Record**, then
 
 A large elapsed timecode stays visible at the top: `HH:MM:SS:FF`, at **30 fps non-drop**. It follows the stored audio sample count, keeps the final value after Stop, and resets for each new recording.
 
-The **Depth source** selector defaults to a simulated moving gradient; noise and audio-only modes are also available. The GUI previews the latest stored depth image. Capture uses 512 x 424 uint16 millimetres at 30 Hz, driven by the audio sample timeline.
+The **Depth source** selector defaults to a simulated moving gradient; noise, audio-only and **Kinect v2 (Microsoft SDK 2.0)** modes are also available. The GUI previews the latest stored depth image. Simulation uses 512 x 424 uint16 millimetres at 30 Hz, driven by the audio sample timeline. Physical Kinect capture retains independent native timestamps.
+
+## Kinect v2 capture on Windows
+
+Install the [Microsoft Kinect for Windows SDK 2.0](https://www.microsoft.com/en-us/download/details.aspx?id=44561), including its runtime and drivers. Follow Microsoft's installation instructions, then connect the powered Kinect v2 to USB 3.0. Configure/build for Windows x64 after installation; CMake detects the SDK through `KINECTSDK20_DIR` or its standard installation path. An explicit path can be supplied with `-DKINECTSDK20_DIR="C:/Program Files/Microsoft SDKs/Kinect/v2.0_1409"`. `-DRECORDER_ENABLE_KINECT=OFF` produces a build without sensor support.
+
+```powershell
+cmake --preset windows
+cmake --build --preset windows --parallel
+.\build\windows\Release\recording_tool.exe kinect-info
+.\build\windows\Release\recording_tool.exe record --depth kinect --source wasapi --output recordings\kinect-test --duration 10
+```
+
+In the GUI, choose **Kinect v2 (Microsoft SDK 2.0)** for depth and **Windows microphone (WASAPI)** for audio. Choose the desired microphone endpoint explicitly. Real-time simulated audio can also accompany physical depth for testing. The Kinect runtime is loaded only when the sensor is selected, so simulation and microphone-only capture still work without it.
+
+Native depth is stored without resampling or clamping, with sensor ID, depth intrinsics, reliable-distance limits, sensor timestamps and host receipt observations. Startup waits up to 15 seconds for a frame; a five-second stream stall interrupts and finalizes the take. Native depth segments rotate on sensor time and **do not pair by filename with audio segments**. Background/manual video export currently supports simulation only; physical capture needs a resolved audio/depth timing solution first. See [Kinect implementation and format](documentation/kinect-implementation.md).
 
 **Encode finished segments to Matroska in background** is enabled by default in the GUI. Each closed depth/audio pair is queued as `video/000000.mkv`, etc. One worker runs one FFmpeg process at a time, at reduced CPU priority with two codec threads. The queue panel shows pending, completed and failed jobs across takes. Stop requests capture finalization without waiting for encoding; you can start another take as soon as capture finishes. Closing the window drains the queue with the interface still responsive. The raw recordings are always retained.
 
@@ -78,6 +93,6 @@ The core build requires CMake 3.16+ and a C++11 compiler, with no downloaded lib
 
 Each take contains `manifest.json`, `checkpoint.json`, segmented `audio/*.wav` files, and `timing/*.jsonl` journals. Audio is uncompressed IEEE float32 PCM, rotated every 60 seconds by default. Packet metadata preserves sample positions, native timing, receipt-clock observations, and error flags for future Kinect synchronization.
 
-Depth-enabled takes additionally contain `depth/*.kd16` and `timing/depth-frames.jsonl`, rotating at the same interval. The last depth frame can extend less than one video frame beyond the audio end; audio samples are unchanged.
+Depth-enabled takes additionally contain `depth/*.kd16` and `timing/depth-frames.jsonl`. Simulated depth rotates with audio, and its last frame can extend less than one video frame beyond the audio end. Kinect depth rotates independently on the sensor timeline; its journal is authoritative. Audio samples are unchanged.
 
 See [the implemented audio milestone](documentation/audio-implementation.md) for format details, tests, and current limits, and [the design documentation](documentation/README.md) for the complete planned tool.

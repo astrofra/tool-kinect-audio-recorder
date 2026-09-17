@@ -3,6 +3,7 @@
 #include <cstring>
 #include <iomanip>
 #include <limits>
+#include <locale>
 #include <sstream>
 #include <stdexcept>
 #ifndef _WIN32
@@ -61,10 +62,12 @@ void generate_depth(DepthFrame& frame, const std::string& pattern) {
         frame.millimetres[y * DepthWidth + x] = static_cast<std::uint16_t>(value);
     }
 }
-DepthWriter::DepthWriter(const std::string& directory, const std::string& pattern, unsigned rate, unsigned segment_seconds)
-    : directory_(directory), pattern_(pattern), rate_(rate), segment_seconds_(segment_seconds), frames_(0),
-      finalized_segments_(0), file_(0), timing_(0), bytes_(DepthWidth * DepthHeight * 2) {
-    if (!rate_ || !segment_seconds_ || (pattern_ != "gradient" && pattern_ != "noise"))
+DepthWriter::DepthWriter(const std::string& directory, const std::string& pattern, unsigned rate, unsigned segment_seconds,
+        const std::string& device_id, const std::string& calibration)
+    : directory_(directory), pattern_(pattern), device_id_(device_id), calibration_(calibration),
+      rate_(rate), segment_seconds_(segment_seconds), frames_(0), finalized_segments_(0), file_(0), timing_(0),
+      bytes_(DepthWidth * DepthHeight * 2), first_time_(0), previous_time_(0), gap_count_(0) {
+    if (!rate_ || !segment_seconds_ || (pattern_ != "gradient" && pattern_ != "noise" && pattern_ != "kinect"))
         throw std::invalid_argument("Invalid depth writer settings");
     create_directories(path_join(directory_, "depth"));
     timing_ = open_file(path_join(directory_, "timing/depth-frames.jsonl"), "wb");
@@ -75,13 +78,14 @@ DepthWriter::~DepthWriter() {
 }
 void DepthWriter::header(bool finalized) {
     unsigned char b[DepthHeaderBytes] = {};
-    std::memcpy(b, "KD16SIM", 7);
+    std::memcpy(b, pattern_ == "kinect" ? "KD16RAW" : "KD16SIM", 7);
     put(b + 8, 1, 4); put(b + 12, DepthHeaderBytes, 4);
     put(b + 16, DepthWidth, 4); put(b + 20, DepthHeight, 4);
     put(b + 24, DepthFps, 4); put(b + 28, 1, 4);
     put(b + 32, files_.back().first, 8); put(b + 40, files_.back().count, 8);
     put(b + 48, rate_, 4); put(b + 52, finalized ? 1 : 0, 4);
-    put(b + 56, audio_position(files_.back().first, rate_), 8);
+    // Native frames have no resolved audio-sample mapping yet.
+    put(b + 56, pattern_ == "kinect" ? 0 : audio_position(files_.back().first, rate_), 8);
     seek(file_, 0, SEEK_SET); write_bytes(file_, b, sizeof(b)); seek(file_, 0, SEEK_END);
 }
 void DepthWriter::close_segment() {
@@ -92,29 +96,56 @@ void DepthWriter::close_segment() {
     ++finalized_segments_;
 }
 void DepthWriter::advance(std::uint64_t audio_frames) {
+    if (pattern_ == "kinect") return;
     const std::uint64_t target = depth_frames_for_audio(audio_frames, rate_);
     while (frames_ < target) {
-        if (!file_ || files_.back().count == static_cast<std::uint64_t>(segment_seconds_) * DepthFps) {
-            close_segment();
-            std::ostringstream name; name << "depth/" << std::setw(6) << std::setfill('0') << files_.size() << ".kd16";
-            File entry = { name.str(), frames_, 0 }; files_.push_back(entry);
-            file_ = open_file(path_join(directory_, entry.path), "wb"); header(false);
-        }
         std::shared_ptr<DepthFrame> frame(new DepthFrame(frames_));
         generate_depth(*frame, pattern_);
-        for (std::size_t i = 0; i < frame->millimetres.size(); ++i) put(&bytes_[i * 2], frame->millimetres[i], 2);
-        const std::uint64_t offset = file_position(file_);
-        write_bytes(file_, bytes_.data(), bytes_.size());
-        std::ostringstream line;
-        line << "{\"frame\":" << frames_ << ",\"file\":" << json_string(files_.back().path)
-             << ",\"file_frame\":" << files_.back().count << ",\"byte_offset\":\"" << offset
-             << "\",\"pts_100ns\":\"" << frames_to_100ns(frames_, DepthFps)
-             << "\",\"audio_sample_floor\":\"" << audio_position(frames_, rate_)
-             << "\",\"generated_at_ticks\":\"" << clock_ticks() << "\"}\n";
-        const std::string text = line.str(); write_bytes(timing_, text.data(), text.size());
-        ++frames_; ++files_.back().count; latest_ = frame;
+        append(frame, frames_ / (static_cast<std::uint64_t>(segment_seconds_) * DepthFps));
     }
 }
+void DepthWriter::write(const DepthFrame& frame) {
+    if (pattern_ != "kinect" || frame.millimetres.size() != DepthWidth * DepthHeight ||
+        frame.relative_time_100ns < 0 || frame.index != frames_ ||
+        (frames_ && (frame.relative_time_100ns <= previous_time_ || frame.receipt_ticks < latest_->receipt_ticks)))
+        throw std::runtime_error("Invalid or non-monotonic Kinect depth frame");
+    if (!frames_) first_time_ = frame.relative_time_100ns;
+    const bool gap = frames_ && frame.relative_time_100ns - previous_time_ > 500000;
+    append(std::shared_ptr<DepthFrame>(new DepthFrame(frame)),
+        static_cast<std::uint64_t>(frame.relative_time_100ns - first_time_) / (10000000ULL * segment_seconds_));
+    previous_time_ = frame.relative_time_100ns;
+    if (gap) ++gap_count_;
+}
+void DepthWriter::append(std::shared_ptr<DepthFrame> frame, std::uint64_t segment) {
+    if (!file_ || files_.back().segment != segment) {
+        close_segment();
+        std::ostringstream name; name << "depth/" << std::setw(6) << std::setfill('0') << files_.size() << ".kd16";
+        File entry = { name.str(), frames_, 0, segment }; files_.push_back(entry);
+        file_ = open_file(path_join(directory_, entry.path), "wb"); header(false);
+    }
+    for (std::size_t i = 0; i < frame->millimetres.size(); ++i) put(&bytes_[i * 2], frame->millimetres[i], 2);
+    const std::uint64_t offset = file_position(file_);
+    write_bytes(file_, bytes_.data(), bytes_.size());
+    std::ostringstream line;
+    line << "{\"frame\":" << frames_ << ",\"file\":" << json_string(files_.back().path)
+         << ",\"file_frame\":" << files_.back().count << ",\"byte_offset\":\"" << offset << '"';
+    if (pattern_ == "kinect") {
+        const std::int64_t delta = frames_ ? frame->relative_time_100ns - previous_time_ : 0;
+        line << ",\"relative_time_100ns\":\"" << frame->relative_time_100ns
+             << "\",\"receipt_ticks\":\"" << frame->receipt_ticks
+             << "\",\"sensor_delta_100ns\":\"" << delta
+             << "\",\"gap_before\":" << (delta > 500000 ? "true" : "false")
+             << ",\"min_reliable_mm\":" << frame->min_reliable_mm
+             << ",\"max_reliable_mm\":" << frame->max_reliable_mm << "}\n";
+    } else {
+        line << ",\"pts_100ns\":\"" << frames_to_100ns(frames_, DepthFps)
+         << "\",\"audio_sample_floor\":\"" << audio_position(frames_, rate_)
+         << "\",\"generated_at_ticks\":\"" << clock_ticks() << "\"}\n";
+    }
+    const std::string text = line.str(); write_bytes(timing_, text.data(), text.size());
+    ++frames_; ++files_.back().count; latest_ = frame;
+}
+
 void DepthWriter::checkpoint() {
     if (file_) { header(false); sync_file(file_); }
     sync_file(timing_);
@@ -123,10 +154,15 @@ void DepthWriter::finish() { close_segment(); sync_file(timing_); }
 std::uint64_t DepthWriter::timing_bytes() const { return file_position(timing_); }
 std::string DepthWriter::json() const {
     std::ostringstream s;
-    s << "{\"source\":\"simulate\",\"pattern\":" << json_string(pattern_)
+    s.imbue(std::locale::classic());
+    s << "{\"source\":" << json_string(pattern_ == "kinect" ? "kinect-sdk-2.0" : "simulate")
+      << ",\"device_id\":" << json_string(device_id_) << ",\"pattern\":" << json_string(pattern_)
       << ",\"width\":512,\"height\":424,\"fps_num\":30,\"fps_den\":1,\"pixel_format\":\"gray16le\","
-         "\"units\":\"millimetres\",\"invalid_value\":0,\"clock\":\"stored-audio-sample-clock\","
-         "\"calibration\":null,\"frames\":" << frames_ << ",\"files\":[";
+         "\"units\":\"millimetres\",\"invalid_value\":0,\"clock\":"
+      << json_string(pattern_ == "kinect" ? "kinect-relative-100ns" : "stored-audio-sample-clock")
+      << ",\"timing_resolved\":" << (pattern_ == "kinect" ? "false" : "true")
+      << ",\"calibration\":" << calibration_ << ",\"gap_intervals\":" << gap_count_
+      << ",\"frames\":" << frames_ << ",\"files\":[";
     for (std::size_t i = 0; i < files_.size(); ++i) {
         if (i) s << ',';
         s << "{\"path\":" << json_string(files_[i].path) << ",\"first_frame\":" << files_[i].first

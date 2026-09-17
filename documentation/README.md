@@ -4,7 +4,7 @@ Research date: **16 September 2026**. Status: **proposed specification, before h
 
 Implementation has started with a C++11 audio recorder. See [the implemented audio milestone](audio-implementation.md) for current capabilities and the [root README](../README.md) for build/run instructions. The design documents below describe the complete target, not a claim that every feature is implemented.
 
-The next implemented milestone adds [simulated depth capture, preview, lossless FFV1 export and a sequential background encoding queue](depth-implementation.md). It requires no Kinect hardware; physical sensor integration remains pending.
+The next implemented milestone adds [simulated depth capture, preview, lossless FFV1 export and a sequential background encoding queue](depth-implementation.md). [Physical Kinect v2 capture now uses Microsoft SDK 2.0](kinect-implementation.md), retaining native timing alongside WASAPI audio.
 
 The application records a Kinect v2 depth stream and an external microphone on a Windows PC, then presents the interview as an animated, ghostlike point cloud with synchronized sound. Capture is native; the final publication target is an ordinary web browser. A command-line workflow renders timecoded video proxies for conventional editing and rebuilds a Kinect/audio recording from the exported XML edit list.
 
@@ -19,7 +19,7 @@ The application records a Kinect v2 depth stream and an external microphone on a
 
 | Question | Recommendation |
 | --- | --- |
-| Which open-source Kinect v2 SDK? | Start with **libfreenect2**, pinned to an audited revision. Windows driver compatibility is the first feasibility gate. |
+| Which Kinect v2 SDK? | The implemented Windows backend uses **Microsoft Kinect for Windows SDK 2.0**, following the selected integration direction. The earlier libfreenect2 assessment remains a historical alternative. |
 | Which language? | **C++11 and CMake** for capture, desktop playback, and export. Neither Python nor C# is required at runtime. |
 | How should synchronization work? | Record device timestamps, audio sample positions, and their relationship to a shared Windows monotonic clock. Estimate drift, calibrate offset, and export explicit presentation timestamps. |
 | Which desktop UI? | **Dear ImGui + GLFW + OpenGL**. Keep capture independent of the GUI. |

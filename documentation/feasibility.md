@@ -2,6 +2,8 @@
 
 Research date: **16 September 2026**.
 
+Implementation update, 17 September: the selected Windows capture backend now uses [Microsoft Kinect SDK 2.0](kinect-implementation.md), with initial local hardware results documented there. The libfreenect2 discussion below records the earlier open-source assessment.
+
 ## 1. Conclusion and limits
 
 This project is feasible as a native C++ application with a separate browser player. The critical unknowns are Windows driver compatibility, sustained depth decoding, and the accuracy of the relationship between sensor time and microphone time. None requires adopting Python or C# by default.

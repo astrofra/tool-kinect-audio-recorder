@@ -11,6 +11,7 @@
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
+#include <thread>
 
 namespace {
 void set_text(char* buffer, std::size_t size, const std::string& text) {
@@ -59,7 +60,7 @@ void draw_depth_preview(const recorder::RecorderStatus& status, GLuint texture,
     ImGui::TextDisabled("512 x 424 / 30 Hz / millimetres");
     if (!status.depth_preview) {
         displayed.reset();
-        ImGui::TextWrapped("Select a simulated depth source and press Record to see the animated depth map.");
+        ImGui::TextWrapped("Select a depth source and press Record to see the depth map.");
         return;
     }
     if (displayed != status.depth_preview) {
@@ -81,8 +82,9 @@ void draw_depth_preview(const recorder::RecorderStatus& status, GLuint texture,
     const float width = std::max(1.0f, ImGui::GetContentRegionAvail().x);
     ImGui::Image(static_cast<ImTextureID>(texture), ImVec2(width, width * recorder::DepthHeight / recorder::DepthWidth));
     ImGui::Text("%llu depth frames stored", static_cast<unsigned long long>(status.depth_frames));
+    if (status.depth_gap_intervals) ImGui::Text("%llu depth gap intervals detected", static_cast<unsigned long long>(status.depth_gap_intervals));
     ImGui::TextDisabled("Blue: near / Red: far / Black: invalid");
-    ImGui::TextWrapped("The square flashes once per audio-clock second. The raw depth map keeps 16-bit precision.");
+    ImGui::TextWrapped("The raw depth map keeps 16-bit precision. Simulated patterns include a one-second marker.");
 }
 void screenshot(GLFWwindow* window, const std::string& path) {
     int w, h; glfwGetFramebufferSize(window, &w, &h);
@@ -97,9 +99,11 @@ void screenshot(GLFWwindow* window, const std::string& path) {
 void error_callback(int, const char* message) { std::cerr << "GLFW: " << message << '\n'; }
 int run(int argc, char** argv) {
     bool smoke = false;
+    bool kinect_smoke = false;
     std::string smoke_output;
-    if (argc == 3 && std::string(argv[1]) == "--smoke-test") { smoke = true; smoke_output = argv[2]; }
-    else if (argc != 1) throw std::runtime_error("Usage: audio_recorder [--smoke-test NEW_DIRECTORY]");
+    if (argc == 3 && (std::string(argv[1]) == "--smoke-test" || std::string(argv[1]) == "--kinect-smoke-test")) {
+        smoke = true; smoke_output = argv[2]; kinect_smoke = std::string(argv[1]) == "--kinect-smoke-test";
+    } else if (argc != 1) throw std::runtime_error("Usage: audio_recorder [--smoke-test|--kinect-smoke-test NEW_DIRECTORY]");
     glfwSetErrorCallback(error_callback);
     if (!glfwInit()) throw std::runtime_error("Cannot initialize GLFW");
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -133,7 +137,7 @@ int run(int argc, char** argv) {
     recorder::RecordOptions options;
     char output[2048]; set_text(output, sizeof(output), smoke ? smoke_output : recorder::default_take_path());
     int source_choice = 0, device_choice = 0, signal_choice = 0, channels = 1;
-    int depth_choice = 1;
+    int depth_choice = kinect_smoke ? 3 : 1;
     int sample_rate = 48000;
     float frequency = 440, amplitude = 0.25f;
     double duration = 0;
@@ -161,7 +165,7 @@ int run(int argc, char** argv) {
         ImGui::Begin("Recorder", 0, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
             ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         ImGui::TextUnformatted("KINECT AUDIO RECORDER");
-        ImGui::TextDisabled("Audio capture and simulated Kinect depth - no sensor needed for simulation");
+        ImGui::TextDisabled("Audio and Kinect v2 depth capture - simulation also available");
         draw_timecode(status, timecode_font, scale_x);
         // Keep the counter visible when controls or session history need scrolling.
         ImGui::BeginChild("Recorder controls", ImVec2(0, 0));
@@ -198,9 +202,15 @@ int run(int argc, char** argv) {
             ImGui::TextDisabled("Uses the device's native shared format (mono/stereo); no automatic source switching.");
         }
         ImGui::SetNextItemWidth(240);
-        ImGui::Combo("Depth source", &depth_choice, "Off (audio only)\0Simulated gradient\0Simulated noise\0");
-        ImGui::BeginDisabled(depth_choice == 0);
-        ImGui::Checkbox("Encode finished segments to Matroska in background", &encode_depth);
+        ImGui::Combo("Depth source", &depth_choice, "Off (audio only)\0Simulated gradient\0Simulated noise\0Kinect v2 (Microsoft SDK 2.0)\0");
+        if (depth_choice == 3) {
+            ImGui::TextWrapped(recorder::kinect_depth_supported() ?
+                "Kinect depth uses native timestamps. Video export for physical captures is not available yet." :
+                "Kinect capture requires a Windows x64 build with Microsoft Kinect SDK 2.0. See the build instructions.");
+        }
+        ImGui::BeginDisabled(depth_choice == 0 || depth_choice == 3);
+        bool selected_encoding = encode_depth && (depth_choice == 1 || depth_choice == 2);
+        if (ImGui::Checkbox("Encode finished segments to Matroska in background", &selected_encoding)) encode_depth = selected_encoding;
         ImGui::EndDisabled();
         ImGui::SetNextItemWidth(-120); ImGui::InputText("Take folder", output, sizeof(output));
         if (ImGui::Button("New take path")) set_text(output, sizeof(output), recorder::default_take_path());
@@ -218,10 +228,10 @@ int run(int argc, char** argv) {
             options.output = output; options.source = source_choice == 0 ? "simulate" : "wasapi";
             options.device_id = device_choice > 0 ? devices[device_choice - 1].id : "";
             options.signal = signal_choice == 0 ? "markers" : "sine";
-            options.depth_pattern = depth_choice == 0 ? "off" : depth_choice == 1 ? "gradient" : "noise";
-            options.encode_depth = encode_depth && depth_choice != 0;
+            options.depth_pattern = depth_choice == 0 ? "off" : depth_choice == 1 ? "gradient" : depth_choice == 2 ? "noise" : "kinect";
+            options.encode_depth = encode_depth && (depth_choice == 1 || depth_choice == 2);
             options.sample_rate = static_cast<unsigned>(sample_rate); options.channels = static_cast<unsigned>(channels);
-            options.frequency = frequency; options.amplitude = amplitude; options.duration_seconds = smoke ? 0.25 : duration;
+            options.frequency = frequency; options.amplitude = amplitude; options.duration_seconds = kinect_smoke ? 3 : smoke ? 0.25 : duration;
             if (source_choice != 0) {
                 // Simulation controls must not constrain the microphone's native format.
                 options.sample_rate = 48000; options.channels = 1;
@@ -273,7 +283,10 @@ int run(int argc, char** argv) {
             break;
         }
         glfwSwapBuffers(window);
-        if (smoke && std::chrono::steady_clock::now() - began > std::chrono::seconds(10)) { exit_code = 1; break; }
+        // Hidden windows do not reliably honor swap interval. Keep the hardware
+        // smoke test near display cadence instead of saturating the Kinect GPU.
+        if (kinect_smoke) std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        if (smoke && std::chrono::steady_clock::now() - began > std::chrono::seconds(kinect_smoke ? 25 : 10)) { exit_code = 1; break; }
     }
     recorder.request_stop(); recorder.wait();
     glDeleteTextures(1, &depth_texture);

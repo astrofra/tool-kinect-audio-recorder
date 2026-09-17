@@ -16,8 +16,12 @@ void validate_options(const RecordOptions& o) {
     if (o.sample_rate < 8000 || o.sample_rate > 192000) throw std::invalid_argument("Sample rate must be 8000..192000");
     if (o.channels < 1 || o.channels > 2) throw std::invalid_argument("Simulation supports one or two channels");
     if (o.signal != "sine" && o.signal != "markers") throw std::invalid_argument("Signal must be sine or markers");
-    if (o.depth_pattern != "off" && o.depth_pattern != "gradient" && o.depth_pattern != "noise")
-        throw std::invalid_argument("Depth must be off, gradient or noise");
+    if (o.depth_pattern != "off" && o.depth_pattern != "gradient" && o.depth_pattern != "noise" && o.depth_pattern != "kinect")
+        throw std::invalid_argument("Depth must be off, gradient, noise or kinect");
+    if (o.depth_pattern == "kinect" && o.fast)
+        throw std::invalid_argument("Kinect depth requires real-time capture; --fast is simulation-only");
+    if (o.depth_pattern == "kinect" && o.encode_depth)
+        throw std::invalid_argument("Kinect depth retains native timestamps; constant-rate video export is currently simulation-only");
     if (o.encode_depth && o.depth_pattern == "off") throw std::invalid_argument("Automatic encoding requires depth capture");
     if (!std::isfinite(o.frequency) || o.frequency <= 0 || o.frequency * (o.channels == 2 ? 1.5 : 1.0) >= o.sample_rate * 0.5)
         throw std::invalid_argument("Tone frequency must be positive and below Nyquist on every channel");

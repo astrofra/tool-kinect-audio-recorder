@@ -16,6 +16,7 @@ struct RecorderStatus {
     std::uint64_t packets;
     std::uint64_t timestamp_errors;
     std::uint64_t depth_frames;
+    std::uint64_t depth_gap_intervals;
     std::shared_ptr<const DepthFrame> depth_preview;
     float peak[2];
     float rms[2];
@@ -29,7 +30,8 @@ public:
     ~Recorder();
     // start/wait belong to the controller thread; status/request_stop may be called concurrently.
     // A supplied source is opened/read/destroyed on the recording thread.
-    void start(const RecordOptions& options, std::unique_ptr<AudioSource> source = std::unique_ptr<AudioSource>());
+    void start(const RecordOptions& options, std::unique_ptr<AudioSource> source = std::unique_ptr<AudioSource>(),
+        std::unique_ptr<DepthSource> depth = std::unique_ptr<DepthSource>());
     void request_stop();
     void wait();
     RecorderStatus status() const;
@@ -38,7 +40,7 @@ public:
 private:
     Recorder(const Recorder&);
     Recorder& operator=(const Recorder&);
-    void run(RecordOptions options, std::unique_ptr<AudioSource> source);
+    void run(RecordOptions options, std::unique_ptr<AudioSource> source, std::unique_ptr<DepthSource> depth);
     mutable std::mutex mutex_;
     RecorderStatus status_;
     std::atomic<bool> stop_;

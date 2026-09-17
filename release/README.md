@@ -43,8 +43,23 @@ From PowerShell in this folder:
 Use a different output folder for each take. Each take contains segmented float32
 WAV audio, a JSON manifest, and timing journals, plus raw `.kd16` segments when
 depth is enabled. Simulation generates samples but does not play them through
-speakers. Physical Kinect capture, playback, rendered video proxies, and DaVinci
-Resolve XML conform are not implemented yet.
+speakers. Playback, rendered video proxies, and DaVinci Resolve XML conform are
+not implemented yet.
+
+For physical capture, install Microsoft Kinect for Windows SDK 2.0 and its drivers,
+connect a powered Kinect v2 to USB 3.0, and use a package built with SDK support.
+Choose **Kinect v2 (Microsoft SDK 2.0)** under **Depth source** and select the
+desired WASAPI microphone. The SDK/runtime is not included in this package.
+
+```powershell
+.\recording_tool.exe kinect-info
+.\recording_tool.exe record --depth kinect --source wasapi --output recordings\kinect-test --duration 10
+```
+
+Physical depth retains native sensor timestamps, calibration and uint16 millimetres.
+Its segments are independent of audio segments. Video export remains simulation-only
+until a calibrated audio/depth timing solution is implemented. Simulation and audio-only
+recording work without the Kinect runtime.
 
 To record depth from the CLI and optionally export one segment as lossless video:
 

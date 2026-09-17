@@ -91,7 +91,9 @@ with tempfile.TemporaryDirectory(prefix="kinect-depth-tests-") as temp:
     original_noise = (root / "prise-é & 11025/depth/000000.kd16").read_bytes()
     assert (repeated / "depth/000000.kd16").read_bytes()[64:] == original_noise[64:64 + 2 * frame_bytes]
     invalid = root / "invalid"
-    run("record", "--output", invalid, "--depth", "kinect", ok=False)
+    run("record", "--output", invalid, "--depth", "unknown", ok=False)
+    run("record", "--output", invalid, "--depth", "kinect", "--fast", ok=False)
+    run("record", "--output", invalid, "--depth", "kinect", "--encode-depth", ok=False)
     assert not invalid.exists()
     for label, content in [("short", b"KD16"), ("truncated", gradient[:-1]),
                            ("unfinished", gradient[:52] + b"\0\0\0\0" + gradient[56:])]:

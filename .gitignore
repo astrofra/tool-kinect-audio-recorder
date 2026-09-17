@@ -5,6 +5,7 @@
 /release/recordings/
 /test-stop-*/
 /test-fault-*/
+/test-kinect-*/
 /test-encoding-*/
 __pycache__/
 *.user
