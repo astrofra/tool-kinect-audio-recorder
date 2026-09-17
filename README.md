@@ -47,7 +47,21 @@ cmake --build --preset windows --parallel
 
 In the GUI, choose **Kinect v2 (Microsoft SDK 2.0)** for depth and **Windows microphone (WASAPI)** for audio. Choose the desired microphone endpoint explicitly. Real-time simulated audio can also accompany physical depth for testing. The Kinect runtime is loaded only when the sensor is selected, so simulation and microphone-only capture still work without it.
 
-Native depth is stored without resampling or clamping, with sensor ID, depth intrinsics, reliable-distance limits, sensor timestamps and host receipt observations. Startup waits up to 15 seconds for a frame; a five-second stream stall produces a warning and retries while the other stream continues. Native depth segments rotate on sensor time and **do not pair by filename with audio segments**. Background/manual video export currently supports simulation only; physical capture needs a resolved audio/depth timing solution first. See [Kinect implementation and format](documentation/kinect-implementation.md).
+Native depth is stored without resampling or clamping, with sensor ID, depth intrinsics, reliable-distance limits, sensor timestamps and host receipt observations. Startup waits up to 15 seconds for a frame; a five-second stream stall produces a warning and retries while the other stream continues. Native depth segments rotate on sensor time and **do not pair by filename with audio segments**. Silent RGB review videos are available for physical capture; synchronized archival audio/depth export still needs a resolved timing solution. See [Kinect implementation and format](documentation/kinect-implementation.md).
+
+## RGB review videos
+
+**Create RGB Matroska preview after Stop** is enabled by default in the GUI for both Kinect and simulated depth. Once the take is finalized, the encoding queue creates **`video/preview-rgb.mkv`**, combining all depth segments. Open it in a player supporting FFV1/Matroska, such as VLC. **Review an existing take** also accepts an earlier take folder and queues the same export. Existing videos are never overwritten.
+
+```powershell
+.\release\recording_tool.exe export-preview --input release\recordings\take-2026-09-17_10-14-55-323
+# Optionally choose --output VIDEO.mkv and/or --ffmpeg PATH.
+.\release\recording_tool.exe record --depth kinect --duration 20 --timestamp-output --output recordings\review --encode-preview
+```
+
+The 512 x 424 video uses exactly the GUI palette: blue near, green midway, red far (500..6000 mm), with invalid zero values in black. It is a colorized depth image, not the Kinect color camera. FFV1 stores these RGB colors losslessly (`bgr0`); the original uint16 depth files remain unchanged. Encoding streams images to FFmpeg without an intermediate raw video file.
+
+The preview is **silent**. Kinect review timing uses host receipt timestamps relative to the first depth image, rounded to a 30 fps playback grid; simulation uses its sample timeline. Gaps hold the last image, and the video ends one playback frame after the last stored image. Multiple arrivals in one playback slot retain the latest image. Sensor-clock resets do not collapse pauses. This is a visual review, not a calibrated synchronization export. Encoding runs after Stop on the existing background queue; a new take can begin while it finishes.
 
 **Encode finished segments to Matroska in background** is enabled by default in the GUI. Each closed depth/audio pair is queued as `video/000000.mkv`, etc. One worker runs one FFmpeg process at a time, at reduced CPU priority with two codec threads. The queue panel shows pending, completed and failed jobs across takes. Stop requests capture finalization without waiting for encoding; you can start another take as soon as capture finishes. Closing the window drains the queue with the interface still responsive. The raw recordings are always retained.
 

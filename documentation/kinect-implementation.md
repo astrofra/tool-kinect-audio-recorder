@@ -38,7 +38,11 @@ Payloads are tightly packed row-major uint16 millimetres. Depth rotation uses el
 
 `timing/depth-frames.jsonl` stores the segment path, byte offset, local/global record index, `source_frame`, `timestamp_epoch`, `relative_time_100ns`, `receipt_ticks`, `sensor_delta_100ns`, `gap_before`, `min_reliable_mm` and `max_reliable_mm`. Sensor and host ticks must not be equated. There is deliberately no fabricated `pts_100ns` or `audio_sample_floor`. The host frequency and audio timestamp observations are preserved for a later calibrated offset/drift fit. Audio synchronization accuracy has not yet been measured.
 
-The simulation FFV1 exporter rejects `KD16RAW`, and CLI/GUI prevent background encoding for physical capture. Retiming native frames to a constant cadence without an explicit timing solution would hide capture gaps and could desynchronize audio. Native recordings remain the source for that future export path.
+The archival simulation FFV1 exporter (`export-depth` / `--encode-depth`) still rejects `KD16RAW`. Synchronized archival export needs an explicit timing solution.
+
+The separate `export-preview --input TAKE` / `--encode-preview` path creates a **silent RGB review**, also available automatically after Stop in the GUI. It combines every finalized depth segment into `video/preview-rgb.mkv`, using the same shared 500..6000 mm blue/green/red palette as the live preview. Encoding uses FFV1 `bgr0`, at 512x424 and 30 fps, streamed directly into FFmpeg; originals are not modified. Finalized interrupted takes with consistent depth files can also be reviewed.
+
+The review starts at the first depth receipt and uses `(receipt_ticks - first_receipt_ticks) / host_clock_frequency`, rounded to the nearest playback slot. Multiple arrivals in one slot keep the latest image; empty slots repeat the preceding image. Thus long gaps retain their duration and clock resets do not shorten the movie. The final image occupies one playback frame. This receipt-based visualization includes delivery jitter; it is not a calibrated sensor timeline or audio synchronization. The Matroska metadata identifies the palette, timing policy and source frame count. Files are published from `.part` only after successful encoding; failure leaves raw inputs untouched.
 
 ## Verification
 

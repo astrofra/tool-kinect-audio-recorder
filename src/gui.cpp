@@ -65,14 +65,8 @@ void draw_depth_preview(const recorder::RecorderStatus& status, GLuint texture,
     }
     if (displayed != status.depth_preview) {
         const std::vector<std::uint16_t>& pixels = status.depth_preview->millimetres;
-        std::vector<unsigned char> rgb(pixels.size() * 3);
-        for (std::size_t i = 0; i < pixels.size(); ++i) {
-            // Visualization only. The archive always retains the original uint16 values.
-            const float t = std::max(0.0f, std::min(1.0f, (pixels[i] - 500.0f) / 5500.0f));
-            rgb[i * 3] = pixels[i] ? static_cast<unsigned char>(255 * t) : 0;
-            rgb[i * 3 + 1] = pixels[i] ? static_cast<unsigned char>(255 * (1 - std::abs(2 * t - 1))) : 0;
-            rgb[i * 3 + 2] = pixels[i] ? static_cast<unsigned char>(255 * (1 - t)) : 0;
-        }
+        std::vector<unsigned char> rgb;
+        recorder::colorize_depth(pixels, rgb);
         glBindTexture(GL_TEXTURE_2D, texture);
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, recorder::DepthWidth, recorder::DepthHeight, 0,
@@ -136,6 +130,7 @@ int run(int argc, char** argv) {
     recorder::Recorder recorder;
     recorder::RecordOptions options;
     char output[2048]; set_text(output, sizeof(output), smoke ? smoke_output : "recordings/take");
+    char preview_take[2048] = {};
     int source_choice = 0, device_choice = 0, signal_choice = 0, channels = 1;
     int depth_choice = kinect_smoke ? 3 : 1;
     int sample_rate = 48000;
@@ -146,6 +141,7 @@ int run(int argc, char** argv) {
     std::string ui_error;
     bool was_active = false, smoke_started = false, close_after_stop = false;
     bool encode_depth = true;
+    bool encode_preview = true;
     bool strict_capture = false;
     const std::chrono::steady_clock::time_point began = std::chrono::steady_clock::now();
     int exit_code = 0;
@@ -158,7 +154,10 @@ int run(int argc, char** argv) {
             glfwSetWindowShouldClose(window, GLFW_FALSE);
         }
         if (close_after_stop && !status.active && !encoding.busy()) break;
-        if (was_active && !status.active) { recorder.wait(); takes.push_back(status.output); }
+        if (was_active && !status.active) {
+            recorder.wait(); takes.push_back(status.output);
+            set_text(preview_take, sizeof(preview_take), status.output);
+        }
         was_active = status.active;
         ImGui_ImplOpenGL3_NewFrame(); ImGui_ImplGlfw_NewFrame(); ImGui::NewFrame();
         const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -206,13 +205,17 @@ int run(int argc, char** argv) {
         ImGui::Combo("Depth source", &depth_choice, "Off (audio only)\0Simulated gradient\0Simulated noise\0Kinect v2 (Microsoft SDK 2.0)\0");
         if (depth_choice == 3) {
             ImGui::TextWrapped(recorder::kinect_depth_supported() ?
-                "Kinect depth uses native timestamps. Video export for physical captures is not available yet." :
+                "Kinect depth keeps native timestamps. RGB review videos are available after Stop." :
                 "Kinect capture requires a Windows x64 build with Microsoft Kinect SDK 2.0. See the build instructions.");
         }
         ImGui::BeginDisabled(depth_choice == 0 || depth_choice == 3);
         bool selected_encoding = encode_depth && (depth_choice == 1 || depth_choice == 2);
         if (ImGui::Checkbox("Encode finished segments to Matroska in background", &selected_encoding)) encode_depth = selected_encoding;
         ImGui::EndDisabled();
+        ImGui::BeginDisabled(depth_choice == 0);
+        ImGui::Checkbox("Create RGB Matroska preview after Stop", &encode_preview);
+        ImGui::EndDisabled();
+        ImGui::TextWrapped("RGB preview: same colors as here, without sound. Pauses hold the last image.");
         ImGui::Checkbox("Stop on capture errors (strict)", &strict_capture);
         ImGui::SetNextItemWidth(-160); ImGui::InputText("Take path prefix", output, sizeof(output));
         ImGui::TextDisabled("Record adds the local date and time (milliseconds) for each new take.");
@@ -234,6 +237,7 @@ int run(int argc, char** argv) {
             options.signal = signal_choice == 0 ? "markers" : "sine";
             options.depth_pattern = depth_choice == 0 ? "off" : depth_choice == 1 ? "gradient" : depth_choice == 2 ? "noise" : "kinect";
             options.encode_depth = encode_depth && (depth_choice == 1 || depth_choice == 2);
+            options.encode_preview = encode_preview && depth_choice != 0;
             options.sample_rate = static_cast<unsigned>(sample_rate); options.channels = static_cast<unsigned>(channels);
             options.frequency = frequency; options.amplitude = amplitude; options.duration_seconds = kinect_smoke ? 3 : smoke ? 0.25 : duration;
             if (source_choice != 0) {
@@ -266,6 +270,17 @@ int run(int argc, char** argv) {
             if (ImGui::SmallButton("Copy path")) ImGui::SetClipboardText(takes[i].c_str());
             ImGui::SameLine(); ImGui::TextUnformatted(takes[i].c_str()); ImGui::PopID();
         }
+        ImGui::Separator(); ImGui::TextUnformatted("REVIEW AN EXISTING TAKE");
+        ImGui::SetNextItemWidth(-100); ImGui::InputText("Take folder", preview_take, sizeof(preview_take));
+        ImGui::BeginDisabled(status.active || encoding.busy() || close_after_stop);
+        if (ImGui::Button("Export RGB preview")) {
+            try {
+                if (!recorder.export_preview(preview_take)) throw std::runtime_error("Cannot queue preview; see encoding error");
+                ui_error.clear();
+            } catch (const std::exception& e) { ui_error = e.what(); }
+        }
+        ImGui::EndDisabled();
+        ImGui::TextWrapped("Open video/preview-rgb.mkv in the take folder once encoding finishes.");
         if (columns) {
             ImGui::TableSetColumnIndex(1);
             ImGui::TextUnformatted("BACKGROUND ENCODING");

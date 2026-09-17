@@ -8,6 +8,7 @@ namespace {
 void job_state(const EncodingJob& job, const std::string& state, const std::string& error) {
     write_atomic(job.output + ".json", "{\"schema\":1,\"state\":" + json_string(state) +
         ",\"depth\":" + json_string(job.depth) + ",\"audio\":" + json_string(job.audio) +
+        ",\"preview_take\":" + json_string(job.preview_take) +
         ",\"output\":" + json_string(job.output) + ",\"updated_utc\":" + json_string(utc_now()) +
         ",\"error\":" + json_string(error) + "}\n");
 }
@@ -18,9 +19,14 @@ void encode(const EncodingJob& job) {
     if (path_exists(job.output)) throw std::runtime_error("Export output already exists: " + job.output);
     job_state(job, "encoding", "");
     try {
-        export_depth_video(job.depth, job.output + ".part", job.audio,
-            job.ffmpeg.empty() ? default_ffmpeg_path() : job.ffmpeg, true, job.output + ".log");
-        publish_file(job.output + ".part", job.output);
+        if (!job.preview_take.empty()) {
+            export_depth_preview(job.preview_take, job.output,
+                job.ffmpeg.empty() ? default_ffmpeg_path() : job.ffmpeg, true, job.output + ".log");
+        } else {
+            export_depth_video(job.depth, job.output + ".part", job.audio,
+                job.ffmpeg.empty() ? default_ffmpeg_path() : job.ffmpeg, true, job.output + ".log");
+            publish_file(job.output + ".part", job.output);
+        }
         job_state(job, "complete", "");
     } catch (const std::exception& e) {
         try { job_state(job, "failed", e.what()); } catch (...) {}

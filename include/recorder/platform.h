@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <cstdio>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -25,8 +26,10 @@ std::uint64_t file_position(std::FILE* file);
 void write_atomic(const std::string& path, const std::string& content);
 // Publish a completed file on the same filesystem, refusing to replace any destination.
 void publish_file(const std::string& temporary, const std::string& destination);
+typedef std::function<void(const unsigned char*, std::size_t)> ProcessWrite;
+typedef std::function<void(const ProcessWrite&)> ProcessInput;
 int run_process(const std::vector<std::string>& arguments, bool background = false,
-    const std::string& log = std::string());
+    const std::string& log = std::string(), const ProcessInput& input = ProcessInput());
 // Prefer a bundled encoder next to this executable; otherwise allow PATH lookup.
 std::string default_ffmpeg_path();
 #ifdef _WIN32

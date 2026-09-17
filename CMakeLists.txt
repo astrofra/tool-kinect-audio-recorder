@@ -12,7 +12,7 @@ include(GNUInstallDirs)
 find_package(Threads REQUIRED)
 
 add_library(recorder_core
-    src/platform.cpp src/process.cpp src/audio.cpp src/depth.cpp src/encoding_queue.cpp src/wav_writer.cpp src/recorder.cpp)
+    src/platform.cpp src/process.cpp src/audio.cpp src/depth.cpp src/preview.cpp src/encoding_queue.cpp src/wav_writer.cpp src/recorder.cpp)
 target_include_directories(recorder_core PUBLIC include)
 target_link_libraries(recorder_core PUBLIC Threads::Threads)
 if(WIN32 AND RECORDER_ENABLE_KINECT AND CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -90,6 +90,9 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration.py $<TARGET_FILE:recording_tool>)
         add_test(NAME recorder_depth COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/depth_integration.py $<TARGET_FILE:recording_tool>)
+        add_test(NAME recorder_preview COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/preview_integration.py $<TARGET_FILE:recording_tool>)
+        set_tests_properties(recorder_preview PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 90)
         add_test(NAME recorder_ffmpeg_bundle COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/bundled_ffmpeg.py $<TARGET_FILE:recording_tool>)
         set_tests_properties(recorder_ffmpeg_bundle PROPERTIES SKIP_RETURN_CODE 77)

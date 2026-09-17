@@ -47,8 +47,31 @@ The GUI chooses a new timestamped folder for each take. In the CLI, add
 directory is still protected. Each take contains segmented float32
 WAV audio, a JSON manifest, and timing journals, plus raw `.kd16` segments when
 depth is enabled. Simulation generates samples but does not play them through
-speakers. Playback, rendered video proxies, and DaVinci Resolve XML conform are
-not implemented yet.
+speakers. In-app playback and DaVinci Resolve XML conform are not implemented yet.
+
+## Watch an RGB preview
+
+**Create RGB Matroska preview after Stop** is enabled by default. After finalization,
+the background queue creates `video/preview-rgb.mkv` in the take folder, for Kinect
+as well as simulation. Open this file in VLC or another FFV1/Matroska player.
+**Review an existing take** accepts an earlier take folder and exports the same
+video. The CLI equivalent is:
+
+```powershell
+.\recording_tool.exe export-preview --input recordings\YOUR-TAKE
+# Optional: --output another-preview.mkv, --ffmpeg PATH
+# For automatic export during CLI recording, add --encode-preview.
+```
+
+The preview combines all depth segments with exactly the screen's blue/green/red
+palette (500..6000 mm; zero is black), at 512 x 424, using lossless RGB FFV1.
+It shows colorized depth, not the Kinect color camera. It is **without sound**;
+Kinect/audio synchronization remains separate work. Kinect playback follows host
+receipt timestamps, rounded to 30 fps; pauses hold the previous image instead of
+speeding up time. Frames arriving in the same playback slot use the latest image.
+The video spans the first through last stored depth image plus one playback frame.
+Simulation follows its stored sample timeline. All raw files and journals stay intact.
+No large intermediate raw video is written, and an existing preview is never replaced.
 
 For physical capture, install Microsoft Kinect for Windows SDK 2.0 and its drivers,
 connect a powered Kinect v2 to USB 3.0, and use a package built with SDK support.
@@ -61,9 +84,10 @@ desired WASAPI microphone. The SDK/runtime is not included in this package.
 ```
 
 Physical depth retains native sensor timestamps, calibration and uint16 millimetres.
-Its segments are independent of audio segments. Video export remains simulation-only
-until a calibrated audio/depth timing solution is implemented. Simulation and audio-only
-recording work without the Kinect runtime.
+Its segments are independent of audio segments. Silent RGB review is available;
+synchronized archival audio/depth export remains simulation-only until a calibrated
+timing solution is implemented. Simulation and audio-only recording work without
+the Kinect runtime.
 
 Capture continues through acquisition warnings by default, including audio
 discontinuities and temporary Kinect/audio read failures. The GUI shows the count
@@ -90,13 +114,14 @@ number and take as the depth file. The command exports one finalized segment at 
 time, rejects existing output files and reports encoder errors. Original timing
 journals remain the authority for the complete take.
 
-The CLI's `--encode-depth` mode waits for all queued jobs before exiting and
+The CLI's `--encode-depth` and `--encode-preview` modes wait for all queued jobs before exiting and
 returns an error if any encoding failed, even when capture itself succeeded.
 Background jobs write `.mkv.part` first, then publish `.mkv` only after success.
 Each attempted job has a `.mkv.json` status and `.mkv.log` encoder diagnostics
 when those files can be written. Failed jobs do not stop capture or later jobs.
 The queue is in memory; it is not automatically resumed after a crash or forced
-exit. Re-export missing videos from the retained originals using `export-depth`.
+exit. Re-export missing videos from the retained originals using `export-depth`
+or `export-preview` (use a new output name if a failed attempt left a `.part`/`.log`).
 CPU priority does not eliminate disk contention: test sustained recordings on
 the intended machine. Uncheck automatic encoding before the next take if needed.
 

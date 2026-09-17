@@ -9,7 +9,7 @@
 namespace recorder {
 RecordOptions::RecordOptions() : source("simulate"), signal("markers"), depth_pattern("off"), sample_rate(48000),
     channels(1), frequency(440.0), amplitude(0.25), duration_seconds(0), segment_seconds(60), fast(false), encode_depth(false),
-    strict_capture(false), timestamped_output(false) {}
+    encode_preview(false), strict_capture(false), timestamped_output(false) {}
 
 void validate_options(const RecordOptions& o) {
     if (o.output.empty()) throw std::invalid_argument("Choose an output directory");
@@ -24,6 +24,7 @@ void validate_options(const RecordOptions& o) {
     if (o.depth_pattern == "kinect" && o.encode_depth)
         throw std::invalid_argument("Kinect depth retains native timestamps; constant-rate video export is currently simulation-only");
     if (o.encode_depth && o.depth_pattern == "off") throw std::invalid_argument("Automatic encoding requires depth capture");
+    if (o.encode_preview && o.depth_pattern == "off") throw std::invalid_argument("RGB preview requires depth capture");
     if (!std::isfinite(o.frequency) || o.frequency <= 0 || o.frequency * (o.channels == 2 ? 1.5 : 1.0) >= o.sample_rate * 0.5)
         throw std::invalid_argument("Tone frequency must be positive and below Nyquist on every channel");
     if (!std::isfinite(o.amplitude) || o.amplitude < 0 || o.amplitude > 1)

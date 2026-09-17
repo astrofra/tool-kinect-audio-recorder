@@ -30,6 +30,12 @@ bool kinect_depth_supported();
 std::unique_ptr<DepthSource> make_kinect_depth_source();
 std::uint64_t depth_frames_for_audio(std::uint64_t samples, unsigned rate);
 void generate_depth(DepthFrame& frame, const std::string& pattern);
+// Shared visualization palette: 500..6000 mm, blue/green/red; zero is black.
+void colorize_depth(const std::vector<std::uint16_t>& depth, std::vector<unsigned char>& rgb);
+// Silent review of a finalized take, using receipt time for Kinect and sample time
+// for simulation. Gaps hold the previous image; originals are never altered.
+void export_depth_preview(const std::string& take, const std::string& output,
+    const std::string& ffmpeg, bool background = false, const std::string& log = std::string());
 
 // Simulation follows audio; Kinect frames retain their independent sensor clock.
 // All methods belong to the writer thread.

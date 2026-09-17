@@ -44,6 +44,9 @@ void usage() {
         "      [--audio MATCHING_SEGMENT.wav] [--ffmpeg PATH]\n"
         "      Lossless FFV1/gray16le. Uses bundled FFmpeg, then PATH.\n"
         "      --ffmpeg overrides automatic selection.\n\n"
+        "  recording_tool export-preview --input TAKE_DIRECTORY [--output VIDEO.mkv]\n"
+        "      [--ffmpeg PATH] RGB colors like the GUI, no audio; gaps hold last image.\n"
+        "      Default output: TAKE_DIRECTORY/video/preview-rgb.mkv\n\n"
         "  --source simulate|wasapi  Default: simulate\n"
         "  --output DIRECTORY       New take directory (never overwritten)\n"
         "  --timestamp-output       Append local start date/time to --output\n"
@@ -59,6 +62,7 @@ void usage() {
         "      kinect: Microsoft Kinect v2 SDK 2.0, native timestamps, real-time only\n"
         "  --segment-seconds N      Audio/depth rotation interval, default 60\n"
         "  --encode-depth           Queue finalized depth + audio as video/*.mkv\n"
+        "  --encode-preview         Create video/preview-rgb.mkv after Stop (also Kinect)\n"
         "  --ffmpeg PATH            Encoder override for --encode-depth\n"
         "  --fast                   Unpaced simulation, requires finite duration\n";
 }
@@ -84,7 +88,8 @@ int run(const std::vector<std::string>& args) {
                   << "\nCalibration: " << depth->calibration_json() << '\n';
         return 0;
     }
-    if (args[1] == "export-depth") {
+    if (args[1] == "export-depth" || args[1] == "export-preview") {
+        const bool preview = args[1] == "export-preview";
         std::string input, output, audio, ffmpeg;
         bool explicit_ffmpeg = false;
         for (std::size_t i = 2; i < args.size(); ++i) {
@@ -93,13 +98,16 @@ int run(const std::vector<std::string>& args) {
             if (++i == args.size()) throw std::invalid_argument("Missing value for " + key);
             if (key == "--input") input = args[i];
             else if (key == "--output") output = args[i];
-            else if (key == "--audio") audio = args[i];
+            else if (key == "--audio" && !preview) audio = args[i];
             else if (key == "--ffmpeg") { ffmpeg = args[i]; explicit_ffmpeg = true; }
             else throw std::invalid_argument("Unknown export option: " + key);
         }
         if (!explicit_ffmpeg) ffmpeg = recorder::default_ffmpeg_path();
-        recorder::export_depth_video(input, output, audio, ffmpeg);
-        std::cout << "Lossless depth video written to " << output << '\n';
+        if (preview) {
+            if (output.empty()) output = recorder::path_join(input, "video/preview-rgb.mkv");
+            recorder::export_depth_preview(input, output, ffmpeg);
+        } else recorder::export_depth_video(input, output, audio, ffmpeg);
+        std::cout << (preview ? "Silent RGB preview written to " : "Lossless depth video written to ") << output << '\n';
         return 0;
     }
     if (args[1] != "record") throw std::invalid_argument("Unknown command: " + args[1]);
@@ -112,6 +120,7 @@ int run(const std::vector<std::string>& args) {
         if (key == "--strict") { o.strict_capture = true; continue; }
         if (key == "--timestamp-output") { o.timestamped_output = true; continue; }
         if (key == "--encode-depth") { o.encode_depth = true; continue; }
+        if (key == "--encode-preview") { o.encode_preview = true; continue; }
         if (++i == args.size()) throw std::invalid_argument("Missing value for " + key);
         const std::string& v = args[i];
         if (key == "--output") o.output = v;
@@ -133,7 +142,7 @@ int run(const std::vector<std::string>& args) {
     }
     if (o.source == "wasapi" && simulation_options) throw std::invalid_argument("WASAPI records its native mix format; simulation controls do not apply");
     if (o.source == "simulate" && !o.device_id.empty()) throw std::invalid_argument("--device applies only to WASAPI");
-    if (!o.ffmpeg.empty() && !o.encode_depth) throw std::invalid_argument("record --ffmpeg requires --encode-depth");
+    if (!o.ffmpeg.empty() && !o.encode_depth && !o.encode_preview) throw std::invalid_argument("record --ffmpeg requires --encode-depth or --encode-preview");
     std::signal(SIGINT, on_signal); std::signal(SIGTERM, on_signal);
 #ifdef _WIN32
     SetConsoleCtrlHandler(console_handler, TRUE);
@@ -163,7 +172,7 @@ int run(const std::vector<std::string>& args) {
               << static_cast<double>(s.frames) / s.format.sample_rate << " seconds\n";
     if (o.depth_pattern != "off") std::cout << s.depth_frames << " depth frames (512x424, nominal 30 Hz, uint16 millimetres), " << s.depth_gap_intervals << " gap intervals\n";
     if (s.warnings) std::cout << s.warnings << " warnings saved to " << recorder::path_join(s.output, "timing/events.jsonl") << '\n';
-    if (o.encode_depth) {
+    if (o.encode_depth || o.encode_preview) {
         std::cout << "Capture finalized; draining background encodings...\n" << std::flush;
         recorder.wait_for_encodings();
         const recorder::EncodingStatus encoding = recorder.encoding_status();

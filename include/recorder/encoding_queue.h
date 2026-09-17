@@ -9,6 +9,7 @@
 namespace recorder {
 struct EncodingJob {
     std::string depth, audio, output, ffmpeg;
+    std::string preview_take; // Nonempty selects whole-take RGB preview instead of archival export.
 };
 struct EncodingStatus {
     std::size_t pending, completed, failed;

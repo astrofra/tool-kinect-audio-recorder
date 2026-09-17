@@ -105,6 +105,16 @@ int main(int argc, char** argv) {
         bool replaced = true;
         try { publish_file(output + ".part", output); } catch (const std::exception&) { replaced = false; }
         require(!replaced && path_exists(output + ".part"), "Publishing never replaces an existing output");
+        // A preview encoder which exits before reading stdin must not deadlock or
+        // terminate the recorder (broken pipe). No incomplete video is published.
+        options.output = "test-preview-failure-" + std::to_string(clock_ticks());
+        options.encode_depth = false; options.encode_preview = true;
+        failing.start(options); failing.wait(); failing.wait_for_encodings();
+        const std::string preview = path_join(options.output, "video/preview-rgb.mkv");
+        require(failing.status().state == "Complete" && failing.encoding_status().failed == 2,
+            "Preview pipe failure is isolated from capture");
+        require(failing.encoding_status().last_error.find("exit 37") != std::string::npos &&
+            !path_exists(preview) && path_exists(preview + ".part"), "Preview failure retains only incomplete output");
         std::cout << "FIFO, single worker, bounded backlog, failure isolation, Stop/new take and shutdown passed\n";
         return 0;
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }

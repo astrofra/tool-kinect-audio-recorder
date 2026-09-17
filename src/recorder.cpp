@@ -177,6 +177,11 @@ public:
         if (depth_ && writer_healthy) depth_->finish();
         if (writer_healthy) queue_finalized_segments();
         manifest(error.empty() ? "complete" : "interrupted", error);
+        if (writer_healthy && options_.encode_preview && depth_frames()) {
+            EncodingJob job; job.preview_take = options_.output;
+            job.output = path_join(options_.output, "video/preview-rgb.mkv"); job.ffmpeg = options_.ffmpeg;
+            encodings_.enqueue(job);
+        }
     }
 private:
     void queue_finalized_segments() {
@@ -240,7 +245,8 @@ private:
         }
         m << "\n  ],\n  \"depth\": " << (depth_ ? depth_->json() : "null")
           << ",\n  \"background_encoding\": {\"enabled\":" << (options_.encode_depth ? "true" : "false")
-          << ",\"directory\":\"video\",\"codec\":\"ffv1\"}\n}\n";
+          << ",\"directory\":\"video\",\"codec\":\"ffv1\"},\n  \"rgb_preview\": {\"enabled\":"
+          << (options_.encode_preview ? "true" : "false") << ",\"path\":\"video/preview-rgb.mkv\",\"audio\":false}\n}\n";
         write_atomic(path_join(options_.output, "manifest.json"), m.str());
     }
     RecordOptions options_;
@@ -265,6 +271,12 @@ RecorderStatus::RecorderStatus() : state("Idle"), frames(0), packets(0), timesta
     peak[0] = peak[1] = rms[0] = rms[1] = 0;
 }
 Recorder::Recorder(EncodingQueue::Executor encoder) : stop_(false), encodings_(encoder) {}
+bool Recorder::export_preview(const std::string& take) {
+    if (take.empty()) throw std::invalid_argument("Choose a take folder to export");
+    EncodingJob job; job.preview_take = take; job.output = path_join(take, "video/preview-rgb.mkv");
+    if (path_exists(job.output) || path_exists(job.output + ".part")) throw std::runtime_error("Preview already exists: " + job.output);
+    return encodings_.enqueue(job);
+}
 Recorder::~Recorder() { request_stop(); wait(); }
 RecorderStatus Recorder::status() const { std::lock_guard<std::mutex> lock(mutex_); return status_; }
 void Recorder::request_stop() { stop_ = true; }

@@ -39,6 +39,7 @@ public:
     RecorderStatus status() const;
     EncodingStatus encoding_status() const { return encodings_.status(); }
     void wait_for_encodings() { encodings_.wait(); }
+    bool export_preview(const std::string& take);
 private:
     Recorder(const Recorder&);
     Recorder& operator=(const Recorder&);
