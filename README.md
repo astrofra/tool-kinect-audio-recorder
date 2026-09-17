@@ -4,18 +4,26 @@ A Windows interview recorder with Kinect v2 depth capture, WASAPI audio and hard
 
 ## Build on Windows
 
-Requirements: Visual Studio 2022 with the C++ desktop workload/Windows SDK, CMake 3.21+ for presets, and Git for Windows. The full release build also uses Git Bash and Windows `curl.exe`/`tar.exe` (with xz/zstd support). The GUI build fetches pinned Dear ImGui and GLFW revisions on its first configuration.
+Requirements: Visual Studio 2022 with the C++ desktop workload/Windows SDK, CMake 3.21+ for presets, and Git for Windows. Rebuilding FFmpeg separately also uses Git Bash and Windows `curl.exe`/`tar.exe` (with xz/zstd support). The GUI build fetches pinned Dear ImGui and GLFW revisions on its first configuration.
 
-For a complete clean build and a ready-to-commit Windows x64 package:
+For a clean recorder build and a ready-to-commit Windows x64 package:
 
 ```powershell
 .\build_release.bat
 .\release\audio_recorder.exe
 ```
 
-The batch file works from any working directory. It invokes the checked-in PowerShell helper, deletes only `build/release/`, fetches the pinned GUI sources again, and compiles both recorder executables and a minimal FFmpeg from scratch with static runtimes. It then runs CTest, CLI/hidden-window GUI simulation and bundled-video export checks before copying the package into `release/`. Internet access and an OpenGL 3.3-capable graphics driver are required for this complete build. FFmpeg and GNU Make source/tool downloads are pinned by SHA-256 and cached under `build/downloads/`; compiled objects are rebuilt. Python 3 is optional for the additional file, codec and package-relocation tests.
+`build_release.bat` works from any working directory. It deletes only `build/release/`, fetches the pinned GUI sources again, and compiles the recorder executables with static runtimes. It **reuses `release/extern/ffmpeg/` without rebuilding or replacing it**, then runs CTest, CLI/hidden-window GUI simulation and bundled-video export checks before updating the recorder package. Internet access and an OpenGL 3.3-capable graphics driver are required for this clean recorder build. Python 3 is optional for the additional file, codec and package-relocation tests.
 
-`release/` contains the two recorder executables, a usage guide, license notices, SHA-256 checksums, and `extern/ffmpeg/` with the encoder, licenses, exact source archive and build recipe. It is tracked normally by Git; the script does not stage files, commit, or push. Existing release files are only updated after compilation and all enabled tests succeed. Other files in `release/`, including recordings, are preserved; `release/recordings/` is ignored. Close running release executables before rebuilding so Windows permits replacement. Edit `packaging/README.md` to change the generated usage guide. Intermediate builds, downloaded dependencies, and test recordings stay under ignored `build/`.
+To rebuild **only FFmpeg**, run:
+
+```powershell
+.\rebuild_ffmpeg.bat
+```
+
+This separate script cleans only `build/ffmpeg-rebuild/`, compiles the pinned minimal FFmpeg from scratch, checks a lossless depth-video round trip, and updates `release/extern/ffmpeg/` plus its entries in `release/SHA256SUMS.txt`. It does not rebuild the recorder. FFmpeg and GNU Make downloads are verified by SHA-256 and reused from `build/downloads/`. Run this when changing FFmpeg's version/build profile, or when its packaged binary/source files are missing. The recorder build reports a missing FFmpeg package before cleaning or compiling; it never starts an implicit FFmpeg rebuild. To rebuild everything, run `rebuild_ffmpeg.bat` followed by `build_release.bat`.
+
+`release/` contains the two recorder executables, a usage guide, license notices, SHA-256 checksums, and `extern/ffmpeg/` with the encoder, licenses, exact source archive and build recipe. It is tracked normally by Git; neither script stages files, commits, or pushes. Existing release files are only updated after the relevant compilation and checks succeed. Other files in `release/`, including recordings, are preserved; `release/recordings/` is ignored. Close running executables before rebuilding them so Windows permits replacement. Edit `packaging/README.md` to change the generated usage guide. Intermediate builds, downloaded dependencies, and test recordings stay under ignored `build/`.
 
 For incremental development builds:
 
@@ -86,6 +94,19 @@ or restore missing data from an earlier take.
 
 Related guidance: [Kinect disconnect loop and Windows audio enhancements](https://ar-sandbox.eu/docs/kinectsandbox-software/troubleshooting/).
 
+### Microphone rejected as an unsupported mono/stereo format
+
+Older builds rejected audio inputs with more than two channels. With audio
+enhancements disabled, the Kinect microphone on the development PC exposes
+**4 channels at 16 kHz, float32**. Keep enhancements **Off** and use the updated
+recorder, which accepts **1 to 32 input channels**. Select **Windows microphone
+(WASAPI)**, choose the Kinect microphone and start a new take. The actual input
+name, sample rate and one meter per channel appear below the recording controls.
+
+All channels are stored in their original order in a single multichannel WAV;
+they are not mixed down to mono/stereo. If a player cannot play that layout,
+open the WAV in an audio editor that supports multichannel files.
+
 ## RGB review videos
 
 **Create RGB Matroska preview after Stop** is enabled by default in the GUI for both Kinect and simulated depth. Once the take is finalized, the encoding queue creates **`video/preview-rgb.mkv`**, combining all depth segments. Open it in a player supporting FFV1/Matroska, such as VLC. **Review an existing take** also accepts an earlier take folder and queues the same export. Existing videos are never overwritten.
@@ -116,7 +137,7 @@ The preview is **silent**. Kinect review timing uses host receipt timestamps rel
 .\build\windows\Release\recording_tool.exe record --source wasapi --output recordings\microphone --duration 0
 ```
 
-Use `--device "<endpoint ID>"` to select a specific microphone. WASAPI uses the endpoint's native shared-mode sample rate and mono/stereo layout, displayed in the GUI and saved in the manifest. It does not silently switch devices. `--help` lists simulation and file-rotation options. Existing take directories are never overwritten.
+Use `--device "<endpoint ID>"` to select a specific microphone. WASAPI retains the endpoint's shared-mode sample rate (8 to 192 kHz) and all input channels (1 to 32), displayed in the GUI and saved in the manifest. Float32 and integer PCM 8/16/24/32-bit inputs are supported; storage is float32 without resampling or downmixing. It does not silently switch devices. Simulation remains mono/stereo. `--help` lists simulation and file-rotation options. Existing take directories are never overwritten.
 
 An explicit CLI `--output` remains an exact directory. Add `--timestamp-output` to use it as a reusable prefix, e.g. `record --output recordings/interview --timestamp-output --depth kinect --source wasapi --duration 10`. Warning-only takes return exit code 0; errors still return nonzero.
 
@@ -146,7 +167,7 @@ The core build requires CMake 3.16+ and a C++11 compiler, with no downloaded lib
 
 ## Recording files
 
-Each take contains `manifest.json`, `checkpoint.json`, segmented `audio/*.wav` files, and `timing/*.jsonl` journals. Audio is uncompressed IEEE float32 PCM, rotated every 60 seconds by default. Packet metadata preserves sample positions, native timing, receipt-clock observations, and error flags for future Kinect synchronization.
+Each take contains `manifest.json`, `checkpoint.json`, segmented `audio/*.wav` files, and `timing/*.jsonl` journals. Audio is uncompressed IEEE float32 PCM, rotated every 60 seconds by default. Multichannel WAVs use WAVEFORMATEXTENSIBLE with the source channel mask; an unspecified microphone array layout stays unspecified. Longer configured segments are shortened when necessary to stay within the 4 GiB RIFF limit, with a logged warning and the effective `segment_seconds` in the manifest. Packet metadata preserves sample positions, native timing, receipt-clock observations, and error flags for future Kinect synchronization.
 
 Depth-enabled takes additionally contain `depth/*.kd16` and `timing/depth-frames.jsonl`. Simulated depth rotates with audio, and its last frame can extend less than one video frame beyond the audio end. Kinect depth rotates independently on the sensor timeline; its journal is authoritative. Audio samples are unchanged.
 

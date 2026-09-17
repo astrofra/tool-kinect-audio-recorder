@@ -20,8 +20,8 @@ struct RecorderStatus {
     std::uint64_t warnings;
     std::string last_warning;
     std::shared_ptr<const DepthFrame> depth_preview;
-    float peak[2];
-    float rms[2];
+    std::vector<float> peak;
+    std::vector<float> rms;
     bool active;
     RecorderStatus();
 };

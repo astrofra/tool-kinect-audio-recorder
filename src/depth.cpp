@@ -1,4 +1,5 @@
 #include "recorder/depth.h"
+#include "recorder/audio.h"
 #include "recorder/platform.h"
 #include <cstring>
 #include <iomanip>
@@ -204,25 +205,36 @@ void export_depth_video(const std::string& input, const std::string& output,
     if (!audio.empty()) {
         // Accept the recorder's own float32 WAV layout, not arbitrary resampled media.
         std::unique_ptr<std::FILE, int(*)(std::FILE*)> wav(open_file(audio, "rb"), std::fclose);
-        unsigned char h[58];
-        if (std::fread(h, 1, sizeof(h), wav.get()) != sizeof(h) || std::memcmp(h, "RIFF", 4) ||
-            std::memcmp(h + 8, "WAVEfmt ", 8) || get(h + 16, 4) != 18 || get(h + 20, 2) != 3 ||
-            get(h + 24, 4) != rate || get(h + 34, 2) != 32 || get(h + 36, 2) != 0 ||
-            std::memcmp(h + 38, "fact", 4) || get(h + 42, 4) != 4 || std::memcmp(h + 50, "data", 4))
+        unsigned char h[80];
+        if (std::fread(h, 1, 20, wav.get()) != 20 || std::memcmp(h, "RIFF", 4) ||
+            std::memcmp(h + 8, "WAVEfmt ", 8) || (get(h + 16, 4) != 18 && get(h + 16, 4) != 40))
             throw std::runtime_error("Expected a matching recorder float32 WAV segment");
+        const unsigned fmt_size = static_cast<unsigned>(get(h + 16, 4));
+        const unsigned header_size = 40 + fmt_size, fact = 20 + fmt_size;
+        if (std::fread(h + 20, 1, header_size - 20, wav.get()) != header_size - 20 ||
+            get(h + 20, 2) != (fmt_size == 40 ? 0xfffe : 3) || get(h + 24, 4) != rate ||
+            get(h + 34, 2) != 32 || get(h + 36, 2) != fmt_size - 18 ||
+            std::memcmp(h + fact, "fact", 4) || get(h + fact + 4, 4) != 4 || std::memcmp(h + fact + 12, "data", 4))
+            throw std::runtime_error("Expected a matching recorder float32 WAV segment");
+        const unsigned char float_guid[16] = {3, 0, 0, 0, 0, 0, 16, 0, 128, 0, 0, 170, 0, 56, 155, 113};
+        if (fmt_size == 40 && (get(h + 38, 2) != 32 || std::memcmp(h + 44, float_guid, sizeof(float_guid))))
+            throw std::runtime_error("Expected float32 in the extensible WAV format");
         const unsigned channels = static_cast<unsigned>(get(h + 22, 2));
-        const std::uint64_t samples = get(h + 46, 4), data_bytes = get(h + 54, 4);
+        const std::uint64_t samples = get(h + fact + 8, 4), data_bytes = get(h + fact + 16, 4);
         seek(wav.get(), 0, SEEK_END);
-        if (!channels || channels > 2 || get(h + 32, 2) != channels * 4 || get(h + 28, 4) != rate * channels * 4 ||
-            data_bytes != samples * channels * 4 || file_position(wav.get()) != 58 + data_bytes ||
-            get(h + 4, 4) != 50 + data_bytes || depth_frames_for_audio(samples, rate) != count)
+        if (!channels || channels > MaxAudioChannels || get(h + 32, 2) != channels * 4 || get(h + 28, 4) != rate * channels * 4 ||
+            data_bytes != samples * channels * 4 || file_position(wav.get()) != header_size + data_bytes ||
+            get(h + 4, 4) != header_size - 8 + data_bytes || depth_frames_for_audio(samples, rate) != count)
             throw std::runtime_error("Audio and depth segment durations/formats do not match");
     }
     // argv is passed directly to the OS. No shell expansion of paths or executable names.
     std::vector<std::string> args = { ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-n",
         "-f", "rawvideo", "-pixel_format", "gray16le", "-video_size", "512x424", "-framerate", "30",
         "-skip_initial_bytes", "64", "-i", input };
-    if (!audio.empty()) { args.push_back("-i"); args.push_back(audio); }
+    if (!audio.empty()) {
+        args.push_back("-guess_layout_max"); args.push_back("0"); // An unspecified microphone array is not a surround layout.
+        args.push_back("-i"); args.push_back(audio);
+    }
     if (background) {
         args.push_back("-filter_threads"); args.push_back("1");
         args.push_back("-filter_complex_threads"); args.push_back("1");

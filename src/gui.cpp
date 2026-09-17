@@ -94,10 +94,12 @@ void error_callback(int, const char* message) { std::cerr << "GLFW: " << message
 int run(int argc, char** argv) {
     bool smoke = false;
     bool kinect_smoke = false;
+    bool wasapi_smoke = false;
     std::string smoke_output;
-    if (argc == 3 && (std::string(argv[1]) == "--smoke-test" || std::string(argv[1]) == "--kinect-smoke-test")) {
+    if (argc == 3 && (std::string(argv[1]) == "--smoke-test" || std::string(argv[1]) == "--kinect-smoke-test" || std::string(argv[1]) == "--wasapi-smoke-test")) {
         smoke = true; smoke_output = argv[2]; kinect_smoke = std::string(argv[1]) == "--kinect-smoke-test";
-    } else if (argc != 1) throw std::runtime_error("Usage: audio_recorder [--smoke-test|--kinect-smoke-test NEW_DIRECTORY]");
+        wasapi_smoke = std::string(argv[1]) == "--wasapi-smoke-test";
+    } else if (argc != 1) throw std::runtime_error("Usage: audio_recorder [--smoke-test|--kinect-smoke-test|--wasapi-smoke-test NEW_DIRECTORY]");
     glfwSetErrorCallback(error_callback);
     if (!glfwInit()) throw std::runtime_error("Cannot initialize GLFW");
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -131,7 +133,7 @@ int run(int argc, char** argv) {
     recorder::RecordOptions options;
     char output[2048]; set_text(output, sizeof(output), smoke ? smoke_output : "recordings/take");
     char preview_take[2048] = {};
-    int source_choice = 0, device_choice = 0, signal_choice = 0, channels = 1;
+    int source_choice = wasapi_smoke ? 1 : 0, device_choice = 0, signal_choice = 0, channels = 1;
     int depth_choice = kinect_smoke ? 3 : 1;
     int sample_rate = 48000;
     float frequency = 440, amplitude = 0.25f;
@@ -178,7 +180,7 @@ int run(int argc, char** argv) {
         ImGui::Separator();
         ImGui::BeginDisabled(status.active || close_after_stop);
         ImGui::SetNextItemWidth(240);
-        ImGui::Combo("Source", &source_choice, "Simulated audio\0Windows microphone (WASAPI)\0");
+        const bool source_changed = ImGui::Combo("Source", &source_choice, "Simulated audio\0Windows microphone (WASAPI)\0");
         if (source_choice == 0) {
             ImGui::SetNextItemWidth(240); ImGui::Combo("Signal", &signal_choice, "Tone + one-second markers\0Continuous sine wave\0");
             ImGui::SetNextItemWidth(150); ImGui::InputInt("Sample rate", &sample_rate, 1000);
@@ -187,8 +189,17 @@ int run(int argc, char** argv) {
             ImGui::SameLine(); ImGui::SetNextItemWidth(200); ImGui::SliderFloat("Amplitude", &amplitude, 0, 1, "%.2f");
             ImGui::TextWrapped("No audio device needed. Stereo uses different tones per channel.");
         } else {
-            if (ImGui::Button("Refresh inputs")) {
-                try { devices = recorder::enumerate_audio_devices(); device_choice = 0; ui_error.clear(); }
+            if (ImGui::Button("Refresh inputs") || source_changed) {
+                try {
+                    const std::string selected_id = device_choice > 0 ? devices[device_choice - 1].id : "";
+                    std::vector<recorder::AudioDevice> refreshed = recorder::enumerate_audio_devices();
+                    int next_choice = 0;
+                    for (std::size_t i = 0; i < refreshed.size(); ++i)
+                        if (refreshed[i].id == selected_id) next_choice = static_cast<int>(i + 1);
+                    if (!selected_id.empty() && next_choice == 0)
+                        throw std::runtime_error("Selected input is unavailable. Select another input or Default Windows input.");
+                    devices.swap(refreshed); device_choice = next_choice; ui_error.clear();
+                }
                 catch (const std::exception& e) { ui_error = e.what(); }
             }
             ImGui::SameLine(); ImGui::SetNextItemWidth(440);
@@ -199,7 +210,7 @@ int run(int argc, char** argv) {
                     if (ImGui::Selectable(devices[i].name.c_str(), device_choice == static_cast<int>(i + 1))) device_choice = static_cast<int>(i + 1);
                 ImGui::EndCombo();
             }
-            ImGui::TextDisabled("Uses the device's native shared format (mono/stereo); no automatic source switching.");
+            ImGui::TextWrapped("Keeps the Windows sample rate and all input channels (up to 32). Saves float32 WAV audio.");
         }
         ImGui::SetNextItemWidth(240);
         ImGui::Combo("Depth source", &depth_choice, "Off (audio only)\0Simulated gradient\0Simulated noise\0Kinect v2 (Microsoft SDK 2.0)\0");
@@ -239,7 +250,7 @@ int run(int argc, char** argv) {
             options.encode_depth = encode_depth && (depth_choice == 1 || depth_choice == 2);
             options.encode_preview = encode_preview && depth_choice != 0;
             options.sample_rate = static_cast<unsigned>(sample_rate); options.channels = static_cast<unsigned>(channels);
-            options.frequency = frequency; options.amplitude = amplitude; options.duration_seconds = kinect_smoke ? 3 : smoke ? 0.25 : duration;
+            options.frequency = frequency; options.amplitude = amplitude; options.duration_seconds = (kinect_smoke || wasapi_smoke) ? 3 : smoke ? 0.25 : duration;
             if (source_choice != 0) {
                 // Simulation controls must not constrain the microphone's native format.
                 options.sample_rate = 48000; options.channels = 1;
@@ -256,6 +267,7 @@ int run(int argc, char** argv) {
         }
         ImGui::Text("%u Hz / %u channel(s) / %llu packets / %llu invalid timestamps", status.format.sample_rate,
             status.format.channels, static_cast<unsigned long long>(status.packets), static_cast<unsigned long long>(status.timestamp_errors));
+        if (!status.source_name.empty()) ImGui::TextWrapped("Recorded input: %s", status.source_name.c_str());
         if (!status.error.empty()) ImGui::TextWrapped("Recording error: %s", status.error.c_str());
         if (status.warnings) {
             ImGui::TextColored(ImVec4(1, 0.75f, 0.25f, 1), "%llu warnings%s", static_cast<unsigned long long>(status.warnings), status.active ? " - capture continues" : "");

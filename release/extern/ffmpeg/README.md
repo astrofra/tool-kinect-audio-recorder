@@ -45,12 +45,19 @@ package; licensing documentation alone does not replace the corresponding source
 
 ## Rebuild
 
+In the recorder repository, run **`rebuild_ffmpeg.bat`** from the root (or by its
+absolute path). It cleans `build/ffmpeg-rebuild/`, builds and tests FFmpeg, then
+updates only `release/extern/ffmpeg/` and its release checksum entries. Downloaded
+archives remain cached under `build/downloads/`. The separate `build_release.bat`
+rebuilds the recorder and reuses this package; it never invokes the FFmpeg build.
+
 Requirements: Visual Studio 2022 C++ desktop tools and Windows SDK, Git for Windows
 (including Bash), Windows PowerShell 5.1+, `curl.exe`, and `tar.exe` capable of
 extracting xz/zstd archives. Local validation used MSVC 19.41.34120. The recorder
 remains C++11; this third-party source uses the C standard selected by FFmpeg.
 
-From this directory, choose **new** work and destination directories:
+To rebuild this package independently of the recorder repository, use the recipe
+in this directory with **new** work and destination directories:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1 -WorkDirectory C:\temp\ffmpeg-work -Destination C:\temp\ffmpeg-package -CacheDirectory C:\temp\ffmpeg-downloads

@@ -142,7 +142,7 @@ work independently of the encoder. Manual export errors are reported to the cons
 
 The bundle includes LGPL notices, the exact unmodified source archive, SHA-256
 pins, MSVC build scripts and generated configuration files. It is rebuilt from
-source by `build_release.bat`, without external codec libraries, GPL/nonfree
+source by `rebuild_ffmpeg.bat` and reused by `build_release.bat`, without external codec libraries, GPL/nonfree
 components, network protocols, GPU encoding or assembly dependencies. See the
 [FFmpeg package description](../extern/ffmpeg/README.md). The recorder remains
 C++11; FFmpeg is an independently built C program.

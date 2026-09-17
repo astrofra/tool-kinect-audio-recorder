@@ -4,6 +4,8 @@
 #include <string>
 
 namespace recorder {
+bool wav_extensible(AudioFormat format);
+std::uint64_t wav_max_frames(AudioFormat format);
 class WavWriter {
 public:
     WavWriter(const std::string& path, AudioFormat format);

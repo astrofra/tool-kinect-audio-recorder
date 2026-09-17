@@ -76,6 +76,8 @@ if(BUILD_TESTING)
     add_executable(recorder_tests tests/core_tests.cpp)
     target_link_libraries(recorder_tests PRIVATE recorder_core)
     add_test(NAME recorder_core COMMAND recorder_tests)
+    add_executable(recorder_multichannel_tests tests/multichannel_tests.cpp)
+    target_link_libraries(recorder_multichannel_tests PRIVATE recorder_core)
     add_executable(recorder_kinect_tests tests/kinect_depth_tests.cpp)
     target_link_libraries(recorder_kinect_tests PRIVATE recorder_core)
     add_test(NAME recorder_kinect_depth COMMAND recorder_kinect_tests)
@@ -86,6 +88,9 @@ if(BUILD_TESTING)
     set_tests_properties(recorder_encoding_queue PROPERTIES TIMEOUT 30)
     find_package(Python3 COMPONENTS Interpreter QUIET)
     if(Python3_Interpreter_FOUND)
+        add_test(NAME recorder_multichannel COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/multichannel_integration.py $<TARGET_FILE:recorder_multichannel_tests> $<TARGET_FILE:recording_tool>)
+        set_tests_properties(recorder_multichannel PROPERTIES TIMEOUT 90)
         add_test(NAME recorder_files COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration.py $<TARGET_FILE:recording_tool>)
         add_test(NAME recorder_depth COMMAND ${Python3_EXECUTABLE}
@@ -99,6 +104,8 @@ if(BUILD_TESTING)
         add_test(NAME recorder_encoding_files COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/encoding_integration.py $<TARGET_FILE:recording_tool>)
         set_tests_properties(recorder_encoding_files PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 90)
+    else()
+        add_test(NAME recorder_multichannel COMMAND recorder_multichannel_tests)
     endif()
 endif()
 

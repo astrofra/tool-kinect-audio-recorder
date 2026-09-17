@@ -6,6 +6,7 @@
 #include <vector>
 
 namespace recorder {
+static const unsigned MaxAudioChannels = 32;
 struct AudioFormat {
     unsigned sample_rate;
     unsigned channels;

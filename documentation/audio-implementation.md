@@ -11,7 +11,7 @@ This document describes implemented behavior. The [product specification](specif
 
 There are no runtime dependencies for the CLI beyond the platform's C/C++ runtime. The optional GUI statically compiles pinned Dear ImGui v1.92.9b and GLFW 3.5.1 sources. The GUI needs an OpenGL 3.3 driver; simulation through the CLI does not need graphics or audio hardware. The application does not install or replace drivers.
 
-`build_release.bat` builds a clean Windows x64 package with the MSVC runtime statically linked into both executables. It runs the available CTest suites and simulation checks against the installed CLI and GUI before updating `release/`. The package includes license notices and checksums, is intended for Git, and needs no separately installed C/C++ runtime. Incremental builds remain available through the `windows` preset. See the repository [build instructions](../README.md).
+`build_release.bat` builds a clean Windows x64 recorder package with the MSVC runtime statically linked into both executables. It reuses the existing `release/extern/ffmpeg/` package and runs the available CTest suites and simulation checks against the installed CLI and GUI before updating `release/`. `rebuild_ffmpeg.bat` rebuilds FFmpeg separately. The package includes license notices and checksums, is intended for Git, and needs no separately installed C/C++ runtime. Incremental builds remain available through the `windows` preset. See the repository [build instructions](../README.md).
 
 The recorder accepts another `AudioSource` implementation through the same interface; tests use this to inject timestamp errors, sequence gaps, and source failures. This does not couple future Kinect capture to the audio device API.
 
@@ -31,7 +31,7 @@ Duration is converted once to a whole number of sample frames at the actual samp
 
 ## Native Windows capture
 
-`devices` returns active input names and opaque endpoint IDs. Capture opens the chosen endpoint or the current default once. The actual mix rate and channel layout are retained; this version accepts mono/stereo float32 and integer PCM input with 8, 16, 24, or 32-bit containers, converting samples to float32 storage. Multichannel selection and resampling are deferred.
+`devices` returns active input names and opaque endpoint IDs. Capture opens the chosen endpoint or the current default once. The actual shared-mode mix rate (8000..192000 Hz) and all 1..32 channels are retained. Float32 and integer PCM input with 8, 16, 24, or 32-bit containers are accepted, converting samples to float32 storage. No resampling, channel reordering or downmixing occurs. Per-channel peak/RMS meters follow the actual channel count, and the GUI displays the resolved input name. Selecting a subset of channels is deferred; simulation still offers one or two channels.
 
 WASAPI provides a device sample position and a correlated QPC value in 100 ns units for each packet. Store the original values and flags, including invalid timestamps and silent packets. Integer conversion does not turn a device into a higher-resolution ADC. The native API behavior follows Microsoft's [capture buffer contract](https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudiocaptureclient-getbuffer) and [event-driven initialization](https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclient-initialize).
 
@@ -57,7 +57,9 @@ take/
     events.jsonl
 ```
 
-WAV files contain little-endian IEEE float32 samples, a format chunk, a sample-count `fact` chunk, and a data chunk. They rotate at the configured sample boundary; rotation may split a source packet. Default rotation is 60 seconds, keeping each file below RIFF size limits even for long takes.
+WAV files contain little-endian IEEE float32 samples, a format chunk, a sample-count `fact` chunk, and a data chunk. Standard mono/stereo files retain the 18-byte IEEE-float format chunk (58-byte file header). More than two channels, or a nonstandard explicit mono/stereo channel mask, use a 40-byte WAVEFORMATEXTENSIBLE chunk (80-byte header), with 32 valid bits, the IEEE-float subtype GUID and the source channel mask. A zero mask retains unspecified positions, as used by the Kinect microphone array; export disables FFmpeg's channel-layout guessing.
+
+Files rotate at a whole-second sample boundary; rotation may split a source packet. Default rotation is 60 seconds. At high channel counts/rates, a longer requested segment is capped to fit RIFF's 32-bit length field, with an `audio_segment_limit` warning and effective `segment_seconds` in the manifest. The audio queue targets five seconds but reduces its slot count to retain the 64 MiB payload budget.
 
 The manifest identifies source kind, selected device, actual sample format/channel mask, clock origin/frequency, simulation recipe, file list, total stored frames, and state. UTC is descriptive metadata. Successful completion follows queue draining, WAV header finalization, file flushing, and manifest replacement. An output directory must be new; the recorder never erases an existing take.
 
@@ -72,6 +74,10 @@ If data is missing, the stored PCM contains the received packets without filling
 ## Validation and limits
 
 The C++ tests exercise sample-clock arithmetic, signal bounds, stop/drain, reuse, overwrite refusal, bad timestamps, source exceptions, and device-position gaps. An independent Python standard-library test parses WAV chunks and JSON, checks sample values on both channels, exact duration, packet continuity, partial packets, rotation across packet boundaries, Unicode paths, silence, and invalid CLI arguments.
+
+The multichannel fixture covers 4-channel/16 kHz, 8-channel/44.1 kHz and 32-channel/192 kHz sources, a nonstandard two-channel mask, and reuse with mono. It checks every meter, maximum packet capacity, the RIFF rotation cap and rejection above 32 channels. Independent Python checks decode every WAV sample, channel mask and segment boundary, reject malformed extensible headers and verify a byte-exact four-channel Matroska round trip with FFmpeg.
+
+On 17 September 2026, a real 45-second capture with Kinect microphone enhancements disabled produced 720,000 sample frames at 16 kHz across four channels, plus 1,350 native depth frames, with zero warnings, invalid audio timestamps or depth gaps. FFmpeg decoded the four-channel WAV byte for byte. The WASAPI GUI smoke test also completed with four meters and both background exports successful. This checks one device/session, not long-duration endurance across all supported formats.
 
 `audio_recorder --smoke-test NEW_DIRECTORY` creates a hidden window, records 250 ms of simulation through the GUI's recorder path, finalizes it, and saves an adjacent PPM framebuffer capture. This tests renderer/recorder integration without a visible desktop window or a microphone. Normal operation omits this argument.
 

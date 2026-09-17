@@ -81,10 +81,16 @@ public:
             else if (IsEqualGUID(ext->SubFormat, KSDATAFORMAT_SUBTYPE_PCM)) type = WAVE_FORMAT_PCM;
         }
         is_float_ = type == WAVE_FORMAT_IEEE_FLOAT;
-        if (format_.channels < 1 || format_.channels > 2 || format_.sample_rate < 8000 || format_.sample_rate > 192000 ||
+        if (format_.channels < 1 || format_.channels > MaxAudioChannels || format_.sample_rate < 8000 || format_.sample_rate > 192000 ||
             (is_float_ ? bits_ != 32 : (type != WAVE_FORMAT_PCM || (bits_ != 8 && bits_ != 16 && bits_ != 24 && bits_ != 32))) ||
-            w->nBlockAlign != format_.channels * bits_ / 8)
-            throw std::runtime_error("Unsupported WASAPI mix format: this version supports mono/stereo PCM or float32");
+            w->nBlockAlign != format_.channels * bits_ / 8) {
+            std::ostringstream message;
+            message << "Unsupported WASAPI mix format for " << info_.name << ": " << format_.sample_rate
+                << " Hz, " << format_.channels << " channels, " << bits_ << " bits, format tag " << type
+                << ", block alignment " << w->nBlockAlign << ". Supported: 1.." << MaxAudioChannels
+                << " channels, 8000..192000 Hz, PCM 8/16/24/32 or float32.";
+            throw std::runtime_error(message.str());
+        }
         check(client_->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK, 0, 0, w, 0), "Initialize shared capture");
         event_.h = CreateEventW(0, FALSE, FALSE, 0);
         if (!event_.h) throw std::runtime_error("Cannot create audio event");

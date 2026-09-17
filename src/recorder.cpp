@@ -236,6 +236,7 @@ private:
           << ",\n  \"timestamp_errors\": " << timestamp_errors_
           << ",\n  \"stored_duration_seconds\": " << static_cast<double>(frames_) / format_.sample_rate
           << ",\n  \"requested_duration_seconds\": " << options_.duration_seconds
+          << ",\n  \"segment_seconds\": " << options_.segment_seconds
           << ",\n  \"simulation\": {\"signal\": " << json_string(options_.signal) << ", \"frequency\": " << options_.frequency
           << ", \"amplitude\": " << options_.amplitude << "},\n  \"audio_files\": [";
         for (std::size_t i = 0; i < files_.size(); ++i) {
@@ -267,9 +268,7 @@ private:
 };
 }
 
-RecorderStatus::RecorderStatus() : state("Idle"), frames(0), packets(0), timestamp_errors(0), depth_frames(0), depth_gap_intervals(0), warnings(0), active(false) {
-    peak[0] = peak[1] = rms[0] = rms[1] = 0;
-}
+RecorderStatus::RecorderStatus() : state("Idle"), frames(0), packets(0), timestamp_errors(0), depth_frames(0), depth_gap_intervals(0), warnings(0), peak(1, 0), rms(1, 0), active(false) {}
 Recorder::Recorder(EncodingQueue::Executor encoder) : stop_(false), encodings_(encoder) {}
 bool Recorder::export_preview(const std::string& take) {
     if (take.empty()) throw std::invalid_argument("Choose a take folder to export");
@@ -303,18 +302,26 @@ void Recorder::run(RecordOptions options, std::unique_ptr<AudioSource> source, s
     try {
         if (!source) source = make_audio_source(options);
         const AudioFormat format = source->open();
-        if (!format.channels || format.channels > 2 || !format.sample_rate || format.sample_rate > 192000)
+        if (!format.channels || format.channels > MaxAudioChannels || !format.sample_rate || format.sample_rate > 192000)
             throw std::runtime_error("Unsupported source format");
+        { std::lock_guard<std::mutex> lock(mutex_);
+          status_.format = format; status_.source_name = source->name();
+          status_.peak.assign(format.channels, 0); status_.rms.assign(format.channels, 0); }
         if (options.duration_seconds > 0 && options.duration_seconds * format.sample_rate < 0.5)
             throw std::runtime_error("Duration is shorter than one sample at the actual source rate");
         const unsigned capacity = source->max_packet_frames();
         if (!capacity || capacity > format.sample_rate) throw std::runtime_error("Unsupported audio packet capacity");
         const std::size_t packet_samples = static_cast<std::size_t>(capacity) * format.channels;
         // Around five seconds at the backend's maximum packet size; bounded to 64 MiB.
-        const unsigned slots = std::max(2U, std::min(2048U, format.sample_rate * 5 / capacity));
-        if (static_cast<std::uint64_t>(slots) * packet_samples * sizeof(float) > 64ULL * 1024 * 1024)
-            throw std::runtime_error("Audio queue would exceed 64 MiB");
+        const unsigned budget_slots = static_cast<unsigned>(64ULL * 1024 * 1024 / (packet_samples * sizeof(float)));
+        const unsigned slots = std::max(2U, std::min(budget_slots, std::min(2048U, format.sample_rate * 5 / capacity)));
         queue.reset(new PacketQueue(slots, packet_samples));
+        const unsigned max_segment_seconds = static_cast<unsigned>(wav_max_frames(format) / format.sample_rate);
+        if (options.segment_seconds > max_segment_seconds) {
+            options.segment_seconds = max_segment_seconds;
+            queue->warn("audio_segment_limit", "Segment duration reduced to " + std::to_string(max_segment_seconds) +
+                " seconds to keep multichannel WAV files within the RIFF size limit");
+        }
         std::pair<std::string, std::string> depth_info("", "null");
         if (options.depth_pattern == "kinect") {
             std::future<std::pair<std::string, std::string> > ready = depth_ready.get_future();
@@ -356,7 +363,6 @@ void Recorder::run(RecordOptions options, std::unique_ptr<AudioSource> source, s
         }
         AudioPacket packet; packet.samples.reserve(packet_samples);
         writer.reset(new SessionWriter(options, format, *source, clock_100ns(), encodings_, depth_info.first, depth_info.second));
-        { std::lock_guard<std::mutex> lock(mutex_); status_.format = format; status_.source_name = source->name(); }
         disk_thread = std::thread([&, packet_samples] {
             try {
                 AudioPacket pending; pending.samples.reserve(packet_samples);
@@ -408,7 +414,7 @@ void Recorder::run(RecordOptions options, std::unique_ptr<AudioSource> source, s
             if (gap && !options.strict_capture) queue->warn("audio_discontinuity", "Audio discontinuity; captured samples and native timing retained");
             if (!valid) queue->warn("audio_timestamp", "Audio timestamp marked invalid by the device; samples retained");
             expected_device_frame = packet.device_frame + count; previous_valid = valid;
-            float peak[2] = {0, 0}; double power[2] = {0, 0};
+            float peak[MaxAudioChannels] = {}; double power[MaxAudioChannels] = {};
             for (std::size_t i = 0; i < packet.samples.size(); ++i) {
                 const float v = packet.samples[i];
                 const unsigned c = static_cast<unsigned>(i % format.channels);
