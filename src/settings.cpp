@@ -7,7 +7,7 @@
 #include <stdexcept>
 
 namespace recorder {
-GuiSettings::GuiSettings() : session("Entretien"), window_width(1536), window_height(1024), maximized(false) {
+GuiSettings::GuiSettings() : session("Interview"), window_width(1536), window_height(1024), maximized(false) {
     recording.output = "recordings/take";
     recording.depth_pattern = "gradient";
     recording.encode_depth = true;

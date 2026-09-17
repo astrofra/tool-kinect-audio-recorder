@@ -5,7 +5,7 @@ This document describes implemented behavior. The [product specification](specif
 ## Available components
 
 - `recording_tool`: record audio or enumerate Windows capture endpoints.
-- `audio_recorder`: Dear ImGui/GLFW interface following the supplied mockup, with French transport controls, RGB depth view, vertical meters, live gain and persistent INI preferences.
+- `audio_recorder`: Dear ImGui/GLFW interface following the supplied mockup, with English transport controls, RGB depth view, vertical meters, live gain and persistent INI preferences.
 - `recorder_core`: portable source interface, deterministic simulator, bounded packet queue, background file writer, float32 WAV serialization, and recording state/control.
 - `WasapiSource`: Windows shared-mode, event-driven capture using native Windows SDK APIs. COM objects are created, used, and released on the capture thread.
 
@@ -29,7 +29,7 @@ Pause keeps acquisition running and discards packets/images until resume. Both q
 
 The GUI loads `recorder.ini` beside its executable, or an explicit `--config` file. UTF-8 quoted strings support backslashes, quotes and line escapes; unknown keys survive a rewrite, while comments are regenerated. Invalid individual values are reported and retain defaults. Writes use the existing atomic metadata writer, are debounced by 600 ms, and flush on close. Relative paths resolve against the INI directory. Audio selection stores an endpoint ID, never an enumeration index; a missing endpoint is not silently replaced. Rebuilds install `recorder.example.ini` only, preserving the personal INI.
 
-The view preserves the 512x424 image aspect ratio and palette. Fonts come from Windows Segoe UI with an embedded ImGui fallback. Meter channels scroll horizontally above four channels. Encoding progress counts finished jobs rather than inventing an active-job estimate; free disk space is refreshed every five seconds. Lecture opens the last completed RGB preview through the Windows file association, without an embedded player.
+The view preserves the 512x424 image aspect ratio and palette. Fonts come from Windows Segoe UI with an embedded ImGui fallback. Meter channels scroll horizontally above four channels. Encoding progress counts finished jobs rather than inventing an active-job estimate; free disk space is refreshed every five seconds. Play opens the last completed RGB preview through the Windows file association, without an embedded player.
 
 ## Simulation signal
 
@@ -47,7 +47,7 @@ WASAPI provides a device sample position and a correlated QPC value in 100 ns un
 
 The initial WASAPI discontinuity flag is retained without treating startup as mid-take loss. Subsequent discontinuities or valid device-position gaps now log warnings and retain the received PCM and native positions without stopping. Timestamp-error packets retain their samples and are excluded from continuity comparisons. No packets for five seconds raises a read error; the default policy journals it, pauses briefly and retries the same source while Kinect acquisition continues. It never switches microphones. Invalid-size/non-finite packets are skipped with a warning. `--strict` restores interruption on source failures, discontinuities and queue overload.
 
-Warning events contain a code, message, occurrence count and first/last host ticks. Pending events are coalesced by code, keeping the diagnostic queue bounded. The writer owns log I/O. The UI reports warnings in **Journal** and displays **TERMINÉ AVEC ALERTES** after finalization; the manifest retains `state: complete` with `warnings`, `last_warning` and `capture_policy`. The CLI returns zero for warning-only takes. If microphone reads keep failing, a finite take stops after its requested wall duration is reached and the current read/retry finishes; an indefinite take remains stoppable. Initial device-open/configuration and file-write errors remain fatal. Retrying an invalidated device handle is not a guarantee of automatic reconnection.
+Warning events contain a code, message, occurrence count and first/last host ticks. Pending events are coalesced by code, keeping the diagnostic queue bounded. The writer owns log I/O. The UI reports warnings in **Log** and displays **COMPLETE WITH WARNINGS** after finalization; the manifest retains `state: complete` with `warnings`, `last_warning` and `capture_policy`. The CLI returns zero for warning-only takes. If microphone reads keep failing, a finite take stops after its requested wall duration is reached and the current read/retry finishes; an indefinite take remains stoppable. Initial device-open/configuration and file-write errors remain fatal. Retrying an invalidated device handle is not a guarantee of automatic reconnection.
 
 ## File contract
 

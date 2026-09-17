@@ -97,9 +97,8 @@ bool gain_knob(double &db, float scale) {
         if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
             db = 0;
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
-            ImGui::SetTooltip(
-                "Gain du WAV et des vu-mètres\nGlisser ou molette ; double-clic : 0 dB\nRéglage fin avec la "
-                "valeur sous le bouton");
+            ImGui::SetTooltip("Gain for WAV and meters\nDrag or scroll; double-click: 0 dB\nFine adjustment with the "
+                              "value below the knob");
     }
     if (ImGui::IsItemFocused()) {
         if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) || ImGui::IsKeyPressed(ImGuiKey_UpArrow))

@@ -46,13 +46,13 @@ std::string clock_text() {
 }
 void open_external(const std::string &path) {
     if (!recorder::path_exists(path))
-        throw std::runtime_error("Fichier indisponible : " + path);
+        throw std::runtime_error("File unavailable: " + path);
 #ifdef _WIN32
     const auto result = ShellExecuteW(0, L"open", recorder::from_utf8(path).c_str(), 0, 0, SW_SHOWNORMAL);
     if (reinterpret_cast<INT_PTR>(result) <= 32)
-        throw std::runtime_error("Aucun lecteur associé à ce fichier. Ouvrez-le avec votre lecteur vidéo.");
+        throw std::runtime_error("No player is associated with this file. Open it with your video player.");
 #else
-    throw std::runtime_error("Ouvrez ce fichier avec votre lecteur : " + path);
+    throw std::runtime_error("Open this file with your player: " + path);
 #endif
 }
 double free_gib(std::string path) {
@@ -113,24 +113,24 @@ void depth_image(const recorder::RecorderStatus &status, GLuint texture,
             d->AddLine(ImVec2(p.x + x, p.y), ImVec2(p.x + x, p.y + size.y), IM_COL32(25, 31, 34, 255));
         for (float y = 32 * scale; y < size.y; y += 32 * scale)
             d->AddLine(ImVec2(p.x, p.y + y), ImVec2(p.x + size.x, p.y + y), IM_COL32(25, 31, 34, 255));
-        ui::centered(ImVec2(p.x, p.y + size.y * .5f - 18 * scale), size.x, "APERÇU DE PROFONDEUR", ui::Muted);
-        ui::centered(ImVec2(p.x, p.y + size.y * .5f + 12 * scale), size.x, "Choisissez une entrée, puis Enregistrer",
+        ui::centered(ImVec2(p.x, p.y + size.y * .5f - 18 * scale), size.x, "DEPTH PREVIEW", ui::Muted);
+        ui::centered(ImVec2(p.x, p.y + size.y * .5f + 12 * scale), size.x, "Select an input, then press Record",
                      ui::Muted);
     }
     d->AddRect(p, ImVec2(p.x + size.x, p.y + size.y), ui::Border);
 }
 const char *state_label(const recorder::RecorderStatus &s) {
     if (s.paused)
-        return "EN PAUSE";
+        return "PAUSED";
     if (s.state == "Preparing")
-        return "PRÉPARATION";
+        return "PREPARING";
     if (s.state == "Finalizing")
-        return "FINALISATION";
+        return "FINALIZING";
     if (s.active)
-        return "ENREGISTREMENT";
+        return "RECORDING";
     if (!s.error.empty())
-        return "INTERROMPU";
-    return s.state == "Idle" ? "PRÊT" : s.warnings ? "TERMINÉ AVEC ALERTES" : "PRISE TERMINÉE";
+        return "INTERRUPTED";
+    return s.state == "Idle" ? "READY" : s.warnings ? "COMPLETE WITH WARNINGS" : "TAKE COMPLETE";
 }
 int run(int argc, char **argv) {
     bool smoke = false, kinect_smoke = false, wasapi_smoke = false, controls_smoke = false;
@@ -272,7 +272,7 @@ int run(int argc, char **argv) {
     unsigned interaction = 0;
     double paused_at = 0;
     bool record_shot = false, pause_shot = false;
-    log("Prêt à enregistrer");
+    log("Ready to record");
     for (;;) {
         glfwPollEvents();
         const auto status = recorder.status();
@@ -295,7 +295,7 @@ int run(int argc, char **argv) {
             if (status.frames || status.depth_frames) {
                 settings.last_take = status.output;
                 preview_take = status.output;
-                log("Prise : " + leaf(status.output));
+                log("Take: " + leaf(status.output));
             }
         }
         was_active = status.active;
@@ -306,7 +306,7 @@ int run(int argc, char **argv) {
         }
         if (encoding.completed != last_completed) {
             last_completed = encoding.completed;
-            log("Encodage terminé");
+            log("Encoding complete");
         }
         if (encoding.failed != last_failed) {
             last_failed = encoding.failed;
@@ -404,7 +404,7 @@ int run(int argc, char **argv) {
         draw->AddRectFilledMultiColor(origin, at(w, h), IM_COL32(29, 34, 37, 255), IM_COL32(24, 29, 32, 255),
                                       IM_COL32(26, 31, 34, 255), IM_COL32(30, 35, 38, 255));
         ui::text(at(24 * s, 8 * s), "DEPTH / AUDIO RECORDER");
-        const std::string session = "Session : " + settings.session;
+        const std::string session = "Session: " + settings.session;
         ui::text(at(w - ImGui::CalcTextSize(session.c_str()).x - 24 * s, 8 * s), session.c_str(), ui::Muted);
         draw->AddLine(at(0, 41 * s), at(w, 41 * s), ui::Border);
         ImGui::PushFont(mono, 80 * s);
@@ -436,7 +436,7 @@ int run(int argc, char **argv) {
         } catch (...) {
         }
         cursor(transportx, 145 * s);
-        if (ui::transport("Lecture", 0, ImVec2(buttonw, 63 * s), play_ready && !status.active, false, s))
+        if (ui::transport("Play", 0, ImVec2(buttonw, 63 * s), play_ready && !status.active, false, s))
             try {
                 open_external(last_video);
             } catch (const std::exception &e) {
@@ -445,22 +445,22 @@ int run(int argc, char **argv) {
             }
         cursor(transportx + buttonw + gap, 145 * s);
         const bool record_clicked =
-            ui::transport("Enregistrer", 1, ImVec2(buttonw, 63 * s), !status.active && !close_after_stop,
+            ui::transport("Record", 1, ImVec2(buttonw, 63 * s), !status.active && !close_after_stop,
                           status.active && !status.paused, s);
         cursor(transportx + 2 * (buttonw + gap), 145 * s);
-        if (ui::transport("Arrêter", 2, ImVec2(buttonw, 63 * s), status.active, false, s))
+        if (ui::transport("Stop", 2, ImVec2(buttonw, 63 * s), status.active, false, s))
             recorder.request_stop();
         cursor(transportx + 3 * (buttonw + gap), 145 * s);
-        if (ui::transport(status.paused ? "Reprendre" : "Pause", 3, ImVec2(buttonw, 63 * s),
+        if (ui::transport(status.paused ? "Resume" : "Pause", 3, ImVec2(buttonw, 63 * s),
                           status.state == "Recording" || status.paused, status.paused, s))
             recorder.set_paused(!status.paused);
 
         const float margin = 18 * s, body_y = 217 * s, body_h = h - body_y - 192 * s, left_w = (w - 3 * margin) * .665f,
                     right_x = 2 * margin + left_w, right_w = w - right_x - margin;
-        ui::panel(at(margin, body_y), ImVec2(left_w, body_h), "PROFONDEUR", s);
+        ui::panel(at(margin, body_y), ImVec2(left_w, body_h), "DEPTH", s);
         ui::panel(at(right_x, body_y), ImVec2(right_w, body_h), "AUDIO", s);
-        ui::text(at(margin + 21 * s, body_y + 51 * s), "Entrée vidéo", ui::Muted);
-        const char *depth_names[] = {"Désactivée", "Simulation — Dégradé", "Simulation — Bruit", "Kinect v2 — Capteur"};
+        ui::text(at(margin + 21 * s, body_y + 51 * s), "Video input", ui::Muted);
+        const char *depth_names[] = {"Disabled", "Simulation — Gradient", "Simulation — Noise", "Kinect v2 — Sensor"};
         const char *depth_ids[] = {"off", "gradient", "noise", "kinect"};
         int depth_index = 0;
         for (int i = 0; i < 4; ++i)
@@ -474,15 +474,15 @@ int run(int argc, char **argv) {
         ImGui::EndDisabled();
         const ImVec2 imagepos = at(margin + 21 * s, body_y + 88 * s), imagesize(left_w - 42 * s, body_h - 128 * s);
         depth_image(status, texture, displayed, imagepos, imagesize, s);
-        ui::text(at(margin + 21 * s, body_y + body_h - 32 * s),
-                 "512 × 424  |  30 i/s  |  Profondeur 16 bits · aperçu RGB", ui::Muted);
+        ui::text(at(margin + 21 * s, body_y + body_h - 32 * s), "512 × 424  |  30 fps  |  16-bit depth · RGB preview",
+                 ui::Muted);
 
-        ui::text(at(right_x + 21 * s, body_y + 51 * s), "Entrée audio", ui::Muted);
-        std::string audio_label = options.source == "simulate" ? "Simulation audio"
-                                  : options.device_id.empty()  ? "Entrée Windows par défaut"
+        ui::text(at(right_x + 21 * s, body_y + 51 * s), "Audio input", ui::Muted);
+        std::string audio_label = options.source == "simulate" ? "Audio simulation"
+                                  : options.device_id.empty()  ? "Default Windows input"
                                                                : settings.device_name;
         if (audio_label.empty())
-            audio_label = "Entrée mémorisée (indisponible)";
+            audio_label = "Saved input (unavailable)";
         bool selected_found = options.device_id.empty();
         for (const auto &d : devices)
             if (options.source == "wasapi" && d.id == options.device_id) {
@@ -490,15 +490,14 @@ int run(int argc, char **argv) {
                 selected_found = true;
             }
         if (options.source == "wasapi" && !selected_found)
-            audio_label += " (indisponible)";
+            audio_label += " (unavailable)";
         cursor(right_x + 139 * s, body_y + 46 * s);
         ImGui::SetNextItemWidth(right_w - 159 * s);
         ImGui::BeginDisabled(status.active || close_after_stop);
         if (ImGui::BeginCombo("##audio", audio_label.c_str())) {
-            if (ImGui::Selectable("Simulation audio", options.source == "simulate"))
+            if (ImGui::Selectable("Audio simulation", options.source == "simulate"))
                 options.source = "simulate";
-            if (ImGui::Selectable("Entrée Windows par défaut",
-                                  options.source == "wasapi" && options.device_id.empty())) {
+            if (ImGui::Selectable("Default Windows input", options.source == "wasapi" && options.device_id.empty())) {
                 options.source = "wasapi";
                 options.device_id.clear();
                 settings.device_name.clear();
@@ -513,7 +512,7 @@ int run(int argc, char **argv) {
                 ImGui::PopID();
             }
             ImGui::Separator();
-            if (ImGui::Selectable("Actualiser les entrées"))
+            if (ImGui::Selectable("Refresh inputs"))
                 refresh();
             ImGui::EndCombo();
         }
@@ -524,12 +523,13 @@ int run(int argc, char **argv) {
         const unsigned rate = status.source_name.empty() ? options.sample_rate : status.format.sample_rate;
         std::snprintf(format, sizeof(format), "%g kHz · %s", rate / 1000.0,
                       meter_channels == 1   ? "Mono"
-                      : meter_channels == 2 ? "Stéréo"
-                                            : "Multicanal");
+                      : meter_channels == 2 ? "Stereo"
+                                            : "Multichannel");
         if (meter_channels > 2)
-            std::snprintf(format, sizeof(format), "%g kHz · %u canaux", rate / 1000.0, meter_channels);
+            std::snprintf(format, sizeof(format), "%g kHz · %u channels", rate / 1000.0, meter_channels);
         ui::text(at(right_x + 21 * s, body_y + 86 * s),
-                 status.source_name.empty() && options.source == "wasapi" ? "Format détecté au démarrage" : format,
+                 status.source_name.empty() && options.source == "wasapi" ? "Format detected when recording starts"
+                                                                          : format,
                  ui::Muted);
         cursor(right_x + 25 * s, body_y + 117 * s);
         ImGui::BeginChild("Audio content", ImVec2(right_w - 50 * s, body_h - 132 * s), ImGuiChildFlags_None,
@@ -558,24 +558,24 @@ int run(int argc, char **argv) {
 
         const float encoding_y = body_y + body_h + 15 * s;
         ui::panel(at(margin, encoding_y), ImVec2(w - 2 * margin, 46 * s), 0, s);
-        ui::text(at(38 * s, encoding_y + 11 * s), "Encodage");
+        ui::text(at(38 * s, encoding_y + 11 * s), "Encoding");
         const auto total = encoding.completed + encoding.failed + encoding.pending + (encoding.active ? 1 : 0);
         const float progress =
             total ? static_cast<float>(encoding.completed + encoding.failed) / static_cast<float>(total) : 0;
         cursor(151 * s, encoding_y + 15 * s);
         ImGui::ProgressBar(progress, ImVec2(510 * s, 17 * s), "");
-        const std::string enc_label = encoding.active      ? "En cours — " + leaf(encoding.current_output)
-                                      : encoding.failed    ? "Échec — ouvrir le journal"
-                                      : encoding.completed ? "Terminé"
-                                                           : "En attente d’une prise";
+        const std::string enc_label = encoding.active      ? "Encoding — " + leaf(encoding.current_output)
+                                      : encoding.failed    ? "Failed — see log"
+                                      : encoding.completed ? "Complete"
+                                                           : "Waiting for a take";
         ui::text(at(682 * s, encoding_y + 11 * s), enc_label.c_str(), encoding.failed ? ui::Red : ui::Muted);
-        const std::string queue_text = std::to_string(encoding.pending) + " en attente";
+        const std::string queue_text = std::to_string(encoding.pending) + " queued";
         ui::text(at(w - 36 * s - ImGui::CalcTextSize(queue_text.c_str()).x, encoding_y + 11 * s), queue_text.c_str(),
                  ui::Muted);
         const float log_y = encoding_y + 59 * s;
         ui::panel(at(margin, log_y), ImVec2(w - 2 * margin, 42 * s), 0, s);
         cursor(30 * s, log_y + 4 * s);
-        if (ImGui::Button("Journal", ImVec2(82 * s, 33 * s)))
+        if (ImGui::Button("Log", ImVec2(82 * s, 33 * s)))
             show_journal = true;
         draw->PushClipRect(at(122 * s, log_y), at(w - 30 * s, log_y + 42 * s), true);
         if (!journal.empty())
@@ -586,19 +586,19 @@ int run(int argc, char **argv) {
         draw->AddCircleFilled(
             at(47 * s, footer + 24 * s), 9 * s,
             status.active ? status.paused ? IM_COL32(242, 190, 74, 255) : ui::Red : IM_COL32(108, 129, 133, 255), 32);
-        ui::text(at(69 * s, footer + 12 * s), close_after_stop ? "Finalisation avant fermeture…"
+        ui::text(at(69 * s, footer + 12 * s), close_after_stop ? "Finalizing before closing…"
                                               : status.active
-                                                  ? status.paused ? "Capture en pause" : "Enregistrement en cours"
+                                                  ? status.paused ? "Recording paused" : "Recording in progress"
                                                   : state_label(status));
         cursor(w * .40f, footer + 7 * s);
-        if (ImGui::Button("Paramètres"))
+        if (ImGui::Button("Settings"))
             show_settings = true;
         ImGui::SameLine();
-        if (ImGui::Button("Prises"))
+        if (ImGui::Button("Takes"))
             show_takes = true;
         if (close_after_stop) {
             ImGui::SameLine();
-            if (ImGui::Button("Garder ouvert"))
+            if (ImGui::Button("Keep open"))
                 close_after_stop = false;
         }
         if (ImGui::GetTime() >= free_after) {
@@ -607,9 +607,9 @@ int run(int argc, char **argv) {
         }
         char space[100];
         if (disk_free < 0)
-            std::snprintf(space, sizeof(space), "Espace disque indisponible");
+            std::snprintf(space, sizeof(space), "Disk space unavailable");
         else
-            std::snprintf(space, sizeof(space), "Disque : %.1f Gio libres", disk_free);
+            std::snprintf(space, sizeof(space), "Disk: %.1f GiB free", disk_free);
         ui::text(at(w - ImGui::CalcTextSize(space).x - 35 * s, footer + 12 * s), space, ui::Muted);
 
         if (record_clicked || (smoke && !controls_smoke && !smoke_started)) {
@@ -637,7 +637,7 @@ int run(int argc, char **argv) {
                 ui_error.clear();
                 last_warnings = 0;
                 held_peaks.clear();
-                log("Enregistrement : " + recorder.status().output);
+                log("Recording: " + recorder.status().output);
             } catch (const std::exception &e) {
                 ui_error = e.what();
                 log(ui_error);
@@ -650,35 +650,35 @@ int run(int argc, char **argv) {
         ImGui::PushFont(body, std::max(18.0f, 24 * s));
         if (show_settings) {
             ImGui::SetNextWindowSize(ImVec2(710, 600), ImGuiCond_FirstUseEver);
-            if (ImGui::Begin("Paramètres", &show_settings)) {
-                ImGui::TextWrapped("Sauvegarde automatique : %s", ini.c_str());
+            if (ImGui::Begin("Settings", &show_settings)) {
+                ImGui::TextWrapped("Automatically saved to: %s", ini.c_str());
                 ImGui::Separator();
                 ImGui::BeginDisabled(status.active);
                 ui::edit_text("Session", settings.session);
-                ui::edit_text("Préfixe des prises", options.output);
-                ImGui::TextDisabled("La date et l’heure sont ajoutées à chaque prise.");
-                if (ImGui::InputDouble("Durée (s, 0 = jusqu’à Arrêter)", &options.duration_seconds, 0, 0, "%.2f"))
+                ui::edit_text("Take path prefix", options.output);
+                ImGui::TextDisabled("Each take adds its start date and time.");
+                if (ImGui::InputDouble("Duration (s, 0 = until Stop)", &options.duration_seconds, 0, 0, "%.2f"))
                     options.duration_seconds = std::isfinite(options.duration_seconds)
                                                    ? std::max(0.0, std::min(86400.0, options.duration_seconds))
                                                    : 0;
                 int segment = static_cast<int>(options.segment_seconds);
-                if (ImGui::InputInt("Rotation des fichiers (s)", &segment))
+                if (ImGui::InputInt("Segment duration (s)", &segment))
                     options.segment_seconds = static_cast<unsigned>(std::max(1, std::min(600, segment)));
-                ImGui::Checkbox("Arrêter sur erreur de capture (strict)", &options.strict_capture);
-                ImGui::Checkbox("Encoder les segments simulés en Matroska", &options.encode_depth);
-                ImGui::Checkbox("Créer l’aperçu RGB après Arrêter", &options.encode_preview);
-                ui::edit_text("FFmpeg (vide = fourni)", options.ffmpeg);
-                if (ImGui::CollapsingHeader("Simulation audio")) {
+                ImGui::Checkbox("Stop on capture errors (strict)", &options.strict_capture);
+                ImGui::Checkbox("Encode simulated segments to Matroska", &options.encode_depth);
+                ImGui::Checkbox("Create RGB preview after Stop", &options.encode_preview);
+                ui::edit_text("FFmpeg (blank = bundled)", options.ffmpeg);
+                if (ImGui::CollapsingHeader("Audio simulation")) {
                     int simulation_rate = static_cast<int>(options.sample_rate);
-                    if (ImGui::InputInt("Fréquence d’échantillonnage", &simulation_rate))
+                    if (ImGui::InputInt("Sample rate", &simulation_rate))
                         options.sample_rate = static_cast<unsigned>(std::max(8000, std::min(192000, simulation_rate)));
                     int channels = static_cast<int>(options.channels);
-                    if (ImGui::SliderInt("Canaux", &channels, 1, 2))
+                    if (ImGui::SliderInt("Channels", &channels, 1, 2))
                         options.channels = static_cast<unsigned>(channels);
                     int signal = options.signal == "sine" ? 1 : 0;
-                    if (ImGui::Combo("Signal", &signal, "Tonalité et repères\0Sinusoïde\0"))
+                    if (ImGui::Combo("Signal", &signal, "Tone and markers\0Sine wave\0"))
                         options.signal = signal ? "sine" : "markers";
-                    if (ImGui::InputDouble("Tonalité (Hz)", &options.frequency, 1, 100, "%.1f"))
+                    if (ImGui::InputDouble("Tone frequency (Hz)", &options.frequency, 1, 100, "%.1f"))
                         options.frequency = std::isfinite(options.frequency)
                                                 ? std::max(1.0, std::min(96000.0, options.frequency))
                                                 : 440;
@@ -688,38 +688,38 @@ int run(int argc, char **argv) {
                 }
                 ImGui::EndDisabled();
                 ImGui::Separator();
-                ImGui::TextWrapped("Gain logiciel : appliqué aux WAV sur tous les canaux. Les voyants rouges signalent "
-                                   "un dépassement de 0 dBFS. Les améliorations audio Windows restent indépendantes.");
-                ImGui::TextWrapped("Pause exclut l’audio et les images reçus pendant la pause. Les horodatages Kinect "
-                                   "sont conservés ; l’aperçu RGB garde l’image précédente pendant cet intervalle.");
-                if (ImGui::Button("Actualiser les entrées audio"))
+                ImGui::TextWrapped("Software gain is applied to every WAV channel. Red indicators warn "
+                                   "at 0 dBFS. Windows audio enhancements are configured separately.");
+                ImGui::TextWrapped("Pause skips incoming audio and depth frames. Kinect timestamps are "
+                                   "preserved; the RGB preview holds the previous image during the pause.");
+                if (ImGui::Button("Refresh audio inputs"))
                     refresh();
             }
             ImGui::End();
         }
         if (show_journal) {
             ImGui::SetNextWindowSize(ImVec2(1000, 430), ImGuiCond_FirstUseEver);
-            if (ImGui::Begin("Journal de session", &show_journal)) {
+            if (ImGui::Begin("Session log", &show_journal)) {
                 for (const auto &line : journal)
                     ImGui::TextWrapped("%s", line.c_str());
                 if (!status.source_name.empty())
-                    ImGui::TextWrapped("Entrée utilisée : %s", status.source_name.c_str());
+                    ImGui::TextWrapped("Active input: %s", status.source_name.c_str());
                 if (!status.output.empty())
-                    ImGui::TextWrapped("Prise : %s", status.output.c_str());
+                    ImGui::TextWrapped("Take: %s", status.output.c_str());
             }
             ImGui::End();
         }
         if (show_takes) {
             ImGui::SetNextWindowSize(ImVec2(800, 300), ImGuiCond_FirstUseEver);
-            if (ImGui::Begin("Prises et prévisualisation", &show_takes)) {
-                ui::edit_text("Dossier de prise", preview_take);
-                if (ImGui::Button("Utiliser pour Lecture"))
+            if (ImGui::Begin("Takes and previews", &show_takes)) {
+                ui::edit_text("Take folder", preview_take);
+                if (ImGui::Button("Select for playback"))
                     settings.last_take = preview_take;
                 ImGui::SameLine();
-                if (ImGui::Button("Copier le chemin"))
+                if (ImGui::Button("Copy path"))
                     ImGui::SetClipboardText(preview_take.c_str());
                 ImGui::BeginDisabled(status.active || encoding.busy());
-                if (ImGui::Button("Exporter l’aperçu RGB"))
+                if (ImGui::Button("Export RGB preview"))
                     try {
                         recorder.export_preview(recorder::settings_relative_path(ini, preview_take));
                         settings.last_take = preview_take;
@@ -729,8 +729,8 @@ int run(int argc, char **argv) {
                         log(ui_error);
                     }
                 ImGui::EndDisabled();
-                ImGui::TextWrapped("Lecture ouvre video/preview-rgb.mkv avec le lecteur associé. Cet aperçu de "
-                                   "profondeur est sans son.");
+                ImGui::TextWrapped("Play opens video/preview-rgb.mkv in the associated player. This depth preview "
+                                   "has no audio.");
                 if (!ui_error.empty())
                     ImGui::TextWrapped("%s", ui_error.c_str());
             }
